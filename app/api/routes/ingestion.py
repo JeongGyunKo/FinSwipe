@@ -1,0 +1,68 @@
+from fastapi import APIRouter, HTTPException
+
+from app.schemas.ingestion import (
+    IngestionAcceptedResponse,
+    NewsResultResponse,
+    NewsProcessingStatusResponse,
+    RawNewsIngestionRequest,
+    WorkerProcessResponse,
+)
+from app.schemas.operations import OperationalStatsResponse
+from app.services.ingestion_service import IngestionService
+
+
+router = APIRouter(tags=["ingestion"])
+service = IngestionService()
+
+
+@router.post(
+    "/news/intake",
+    response_model=IngestionAcceptedResponse,
+    summary="Store raw news metadata and queue enrichment",
+)
+async def ingest_raw_news(
+    payload: RawNewsIngestionRequest,
+) -> IngestionAcceptedResponse:
+    return await service.ingest_article(payload)
+
+
+@router.get(
+    "/operations/stats",
+    response_model=OperationalStatsResponse,
+    summary="Get operational metrics for jobs and fetch failures",
+)
+async def get_operational_stats() -> OperationalStatsResponse:
+    return await service.get_operational_stats()
+
+
+@router.get(
+    "/news/{news_id}",
+    response_model=NewsProcessingStatusResponse,
+    summary="Get raw news, latest job, and enrichment result",
+)
+async def get_news_status(news_id: str) -> NewsProcessingStatusResponse:
+    result = await service.get_news_status(news_id)
+    if result is None:
+        raise HTTPException(status_code=404, detail="News item not found.")
+    return result
+
+
+@router.get(
+    "/news/{news_id}/result",
+    response_model=NewsResultResponse,
+    summary="Get backend-friendly enrichment result for a news item",
+)
+async def get_news_result(news_id: str) -> NewsResultResponse:
+    result = await service.get_news_result(news_id)
+    if result is None:
+        raise HTTPException(status_code=404, detail="News item not found.")
+    return result
+
+
+@router.post(
+    "/jobs/process-next",
+    response_model=WorkerProcessResponse,
+    summary="Process the next queued enrichment job",
+)
+async def process_next_job() -> WorkerProcessResponse:
+    return service.process_next_job()

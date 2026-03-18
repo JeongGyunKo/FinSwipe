@@ -1,0 +1,30 @@
+from __future__ import annotations
+
+import os
+from dataclasses import dataclass
+
+
+@dataclass(frozen=True, slots=True)
+class AppSettings:
+    database_backend: str
+    postgres_dsn: str | None
+    sqlite_path: str | None
+    app_host: str
+    app_port: int
+    worker_poll_interval_seconds: float
+
+
+def get_settings() -> AppSettings:
+    """Load application settings from environment variables."""
+    return AppSettings(
+        database_backend=(
+            os.getenv("GENAI_DATABASE_BACKEND")
+            or os.getenv("DATABASE_BACKEND")
+            or "sqlite"
+        ).lower(),
+        postgres_dsn=os.getenv("GENAI_POSTGRES_DSN") or os.getenv("DATABASE_URL"),
+        sqlite_path=os.getenv("GENAI_SQLITE_DB_PATH"),
+        app_host=os.getenv("GENAI_APP_HOST", "127.0.0.1"),
+        app_port=int(os.getenv("GENAI_APP_PORT", "8000")),
+        worker_poll_interval_seconds=float(os.getenv("GENAI_WORKER_POLL_INTERVAL", "5")),
+    )
