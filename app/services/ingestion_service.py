@@ -1,8 +1,10 @@
 from __future__ import annotations
 
+import asyncio
 from datetime import datetime, timedelta, timezone
 
 from app.repositories import EnrichmentRepository, create_repository
+from app.schemas.enrichment import ArticleEnrichmentRequest
 from app.schemas.ingestion import EnrichmentJobRecord
 from app.schemas.ingestion import (
     DirectTextIngestionRequest,
@@ -27,9 +29,23 @@ class IngestionService:
         repository: EnrichmentRepository | None = None,
         fetch_retry_policy: FetchRetryPolicy | None = None,
     ) -> None:
-        self._repository = repository or create_repository()
+        self._repository = repository
         self._fetch_retry_policy = fetch_retry_policy or FetchRetryPolicy()
-        self._orchestrator = EnrichmentOrchestrator(repository=self._repository)
+        self._orchestrator: EnrichmentOrchestrator | None = (
+            EnrichmentOrchestrator(repository=repository) if repository is not None else None
+        )
+
+    @property
+    def repository(self) -> EnrichmentRepository:
+        if self._repository is None:
+            self._repository = create_repository()
+        return self._repository
+
+    @property
+    def orchestrator(self) -> EnrichmentOrchestrator:
+        if self._orchestrator is None:
+            self._orchestrator = EnrichmentOrchestrator(repository=self.repository)
+        return self._orchestrator
 
     async def ingest_article(
         self,
@@ -47,9 +63,9 @@ class IngestionService:
         self,
         payload: RawNewsIngestionRequest,
     ) -> IngestionAcceptedResponse:
-        self._repository.upsert_raw_news(payload)
+        await asyncio.to_thread(self.repository.upsert_raw_news, payload)
 
-        active_job = self._repository.get_active_job(payload.news_id)
+        active_job = await asyncio.to_thread(self.repository.get_active_job, payload.news_id)
         if active_job is not None:
             return IngestionAcceptedResponse(
                 news_id=payload.news_id,
@@ -58,18 +74,19 @@ class IngestionService:
                 job=active_job,
             )
 
-        job = self._repository.create_enrichment_job(payload.news_id)
+        job = await asyncio.to_thread(self.repository.create_enrichment_job, payload.news_id)
         return IngestionAcceptedResponse(
             news_id=payload.news_id,
             queued=True,
-                message="Raw news metadata saved and enrichment job queued.",
-                job=job,
-            )
+            message="Raw news metadata saved and enrichment job queued.",
+            job=job,
+        )
 
     async def get_news_status(self, news_id: str) -> NewsProcessingStatusResponse | None:
-        raw_news = self._repository.get_raw_news(news_id)
-        latest_job = self._repository.get_latest_job(news_id)
-        enrichment = self._repository.get_enrichment_result(news_id)
+        raw_news, latest_job, enrichment = await asyncio.to_thread(
+            self.repository.get_news_snapshot,
+            news_id,
+        )
 
         if raw_news is None and latest_job is None and enrichment is None:
             return None
@@ -82,9 +99,10 @@ class IngestionService:
         )
 
     async def get_news_result(self, news_id: str) -> NewsResultResponse | None:
-        raw_news = self._repository.get_raw_news(news_id)
-        latest_job = self._repository.get_latest_job(news_id)
-        enrichment = self._repository.get_enrichment_result(news_id)
+        raw_news, latest_job, enrichment = await asyncio.to_thread(
+            self.repository.get_news_snapshot,
+            news_id,
+        )
 
         if raw_news is None and latest_job is None and enrichment is None:
             return None
@@ -97,10 +115,10 @@ class IngestionService:
         )
 
     async def get_operational_stats(self) -> OperationalStatsResponse:
-        return self._repository.get_operational_stats()
+        return await asyncio.to_thread(self.repository.get_operational_stats)
 
     def process_next_job(self) -> WorkerProcessResponse:
-        job = self._repository.claim_next_enrichment_job()
+        job = self.repository.claim_next_enrichment_job()
         if job is None:
             return WorkerProcessResponse(
                 processed=False,
@@ -108,9 +126,9 @@ class IngestionService:
                 message="No queued enrichment job was available.",
             )
 
-        raw_news = self._repository.get_raw_news(job.news_id)
+        raw_news = self.repository.get_raw_news(job.news_id)
         if raw_news is None:
-            failed_job = self._repository.mark_job_failed(
+            failed_job = self.repository.mark_job_failed(
                 job.job_id,
                 error_message="Raw news metadata was missing for the claimed job.",
             )
@@ -123,17 +141,17 @@ class IngestionService:
             )
 
         if self._has_direct_text(raw_news):
-            enrichment = self._orchestrator.run_with_text(
+            enrichment = self.orchestrator.run_with_text(
                 raw_news,
                 article_text=getattr(raw_news, "article_text", None),
                 summary_text=getattr(raw_news, "summary_text", None),
             )
         else:
-            enrichment = self._orchestrator.run(raw_news)
+            enrichment = self.orchestrator.run(raw_news)
 
         if enrichment.analysis_outcome == AnalysisOutcome.FATAL_FAILURE:
             if self._should_retry_job(job=job, analysis_status=enrichment.analysis_status, enrichment=enrichment):
-                updated_job = self._repository.requeue_job(
+                updated_job = self.repository.requeue_job(
                     job.job_id,
                     error_message=(
                         f"Retry scheduled after transient failure: {enrichment.analysis_status.value}"
@@ -152,7 +170,7 @@ class IngestionService:
                     enrichment=enrichment,
                 )
 
-            updated_job = self._repository.mark_job_failed(
+            updated_job = self.repository.mark_job_failed(
                 job.job_id,
                 error_message=(
                     f"Enrichment ended with fatal outcome: {enrichment.analysis_status.value}"
@@ -160,13 +178,13 @@ class IngestionService:
                 analysis_status=enrichment.analysis_status,
             )
         else:
-            updated_job = self._repository.mark_job_completed(
+            updated_job = self.repository.mark_job_completed(
                 job.job_id,
                 analysis_status=enrichment.analysis_status,
             )
 
         if self._has_direct_text(raw_news):
-            self._repository.clear_raw_news_text_inputs(raw_news.news_id)
+            self.repository.clear_raw_news_text_inputs(raw_news.news_id)
 
         return WorkerProcessResponse(
             processed=True,

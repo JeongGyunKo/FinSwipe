@@ -3,6 +3,9 @@ from __future__ import annotations
 import os
 
 
+DEFAULT_POSTGRES_CONNECT_TIMEOUT_SECONDS = 3
+
+
 def get_postgres_dsn() -> str | None:
     """Return the configured Postgres DSN when one is available."""
     return os.getenv("GENAI_POSTGRES_DSN") or os.getenv("DATABASE_URL")
@@ -19,7 +22,11 @@ def initialize_postgres_database(dsn: str | None = None) -> str:
 
     import psycopg
 
-    with psycopg.connect(resolved_dsn, autocommit=True) as connection:
+    with psycopg.connect(
+        resolved_dsn,
+        autocommit=True,
+        connect_timeout=DEFAULT_POSTGRES_CONNECT_TIMEOUT_SECONDS,
+    ) as connection:
         with connection.cursor() as cursor:
             cursor.execute(
                 """
@@ -119,12 +126,21 @@ def initialize_postgres_database(dsn: str | None = None) -> str:
 
 def connect_postgres(dsn: str | None = None):
     """Open a Postgres connection configured for dict-like row access."""
-    resolved_dsn = initialize_postgres_database(dsn)
+    resolved_dsn = dsn or get_postgres_dsn()
+    if not resolved_dsn:
+        raise RuntimeError(
+            "Postgres backend selected but no DSN was configured. "
+            "Set GENAI_POSTGRES_DSN or DATABASE_URL."
+        )
 
     import psycopg
     from psycopg.rows import dict_row
 
-    return psycopg.connect(resolved_dsn, row_factory=dict_row)
+    return psycopg.connect(
+        resolved_dsn,
+        row_factory=dict_row,
+        connect_timeout=DEFAULT_POSTGRES_CONNECT_TIMEOUT_SECONDS,
+    )
 
 
 def ping_postgres(dsn: str | None = None) -> tuple[bool, str | None]:
@@ -136,7 +152,11 @@ def ping_postgres(dsn: str | None = None) -> tuple[bool, str | None]:
     try:
         import psycopg
 
-        with psycopg.connect(resolved_dsn, autocommit=True) as connection:
+        with psycopg.connect(
+            resolved_dsn,
+            autocommit=True,
+            connect_timeout=DEFAULT_POSTGRES_CONNECT_TIMEOUT_SECONDS,
+        ) as connection:
             with connection.cursor() as cursor:
                 cursor.execute("SELECT 1")
                 cursor.fetchone()

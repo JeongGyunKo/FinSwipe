@@ -17,6 +17,16 @@ from pydantic import (
 
 JSONScalar = str | int | float | bool | None
 JSONObject = dict[str, JSONScalar]
+_DIRECT_TEXT_SENTINELS = frozenset(
+    {
+        "EMPTY",
+        "N/A",
+        "NA",
+        "NONE",
+        "NULL",
+        "-",
+    }
+)
 
 
 class SchemaModel(BaseModel):
@@ -105,6 +115,21 @@ class ArticleEnrichmentRequest(SchemaModel):
         return normalized or None
 
 
+def normalize_optional_text_input(value: object) -> object:
+    """Convert placeholder direct-text values into missing values."""
+    if value is None:
+        return None
+    if not isinstance(value, str):
+        return value
+
+    normalized = value.strip()
+    if not normalized:
+        return None
+    if normalized.upper() in _DIRECT_TEXT_SENTINELS:
+        return None
+    return normalized
+
+
 class FlexibleTextEnrichmentRequest(ArticleEnrichmentRequest):
     article_text: str | None = Field(
         default=None,
@@ -117,6 +142,11 @@ class FlexibleTextEnrichmentRequest(ArticleEnrichmentRequest):
         validation_alias=AliasChoices("summary_text", "text"),
         description="Licensed summary/snippet text supplied directly by the upstream provider.",
     )
+
+    @field_validator("article_text", "summary_text", mode="before")
+    @classmethod
+    def normalize_direct_text_fields(cls, value: object) -> object:
+        return normalize_optional_text_input(value)
 
     @property
     def has_direct_text(self) -> bool:

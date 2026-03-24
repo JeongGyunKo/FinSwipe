@@ -1,3 +1,5 @@
+import asyncio
+import logging
 from pathlib import Path
 
 from fastapi import FastAPI
@@ -18,8 +20,8 @@ from app.db import initialize_database_backend
 
 
 configure_logging()
-initialize_database_backend()
 settings = get_settings()
+logger = logging.getLogger(__name__)
 
 WEB_DIR = Path(__file__).resolve().parent / "web"
 
@@ -29,6 +31,17 @@ app = FastAPI(
     version="0.1.0",
     description="Enrichment API for financial news articles.",
 )
+
+
+@app.on_event("startup")
+async def warm_database_backend() -> None:
+    async def _initialize_in_background() -> None:
+        try:
+            await asyncio.to_thread(initialize_database_backend)
+        except Exception:
+            logger.exception("Background database initialization failed during startup.")
+
+    asyncio.create_task(_initialize_in_background())
 
 
 @app.middleware("http")

@@ -1,3 +1,5 @@
+import asyncio
+
 from app.repositories import EnrichmentRepository, create_repository
 from app.schemas.enrichment import (
     ArticleEnrichmentRequest,
@@ -27,28 +29,44 @@ class EnrichmentService:
         self,
         repository: EnrichmentRepository | None = None,
     ) -> None:
-        self._repository = repository or create_repository()
-        self._orchestrator = EnrichmentOrchestrator(repository=self._repository)
+        self._repository = repository
+        self._orchestrator: EnrichmentOrchestrator | None = (
+            EnrichmentOrchestrator(repository=repository) if repository is not None else None
+        )
+
+    @property
+    def repository(self) -> EnrichmentRepository:
+        if self._repository is None:
+            self._repository = create_repository()
+        return self._repository
+
+    @property
+    def orchestrator(self) -> EnrichmentOrchestrator:
+        if self._orchestrator is None:
+            self._orchestrator = EnrichmentOrchestrator(repository=self.repository)
+        return self._orchestrator
 
     async def enrich_article(
         self,
         payload: FlexibleTextEnrichmentRequest,
     ) -> ArticleEnrichmentResponse:
         if payload.has_direct_text:
-            storage_payload = self._orchestrator.run_with_text(
+            storage_payload = await asyncio.to_thread(
+                self.orchestrator.run_with_text,
                 payload,
                 article_text=payload.article_text,
                 summary_text=payload.summary_text,
             )
         else:
-            storage_payload = self._orchestrator.run(payload)
+            storage_payload = await asyncio.to_thread(self.orchestrator.run, payload)
         return build_api_enrichment_response(storage_payload)
 
     async def enrich_article_text(
         self,
         payload: DirectTextEnrichmentRequest,
     ) -> ArticleEnrichmentResponse:
-        storage_payload = self._orchestrator.run_with_text(
+        storage_payload = await asyncio.to_thread(
+            self.orchestrator.run_with_text,
             payload,
             article_text=payload.article_text,
             summary_text=payload.summary_text,

@@ -1,3 +1,5 @@
+import asyncio
+
 from fastapi import APIRouter, HTTPException
 
 from app.schemas.ingestion import (
@@ -77,4 +79,4 @@ async def get_news_result(news_id: str) -> NewsResultResponse:
     summary="Process the next queued enrichment job",
 )
 async def process_next_job() -> WorkerProcessResponse:
-    return service.process_next_job()
+    return await asyncio.to_thread(service.process_next_job)

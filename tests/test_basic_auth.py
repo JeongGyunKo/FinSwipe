@@ -31,11 +31,14 @@ def test_basic_auth_protects_root_and_docs_but_not_health(monkeypatch) -> None:
     root_response = client.get("/")
     docs_response = client.get("/docs")
     health_response = client.get("/health")
+    deep_health_response = client.get("/health/deep")
 
     assert root_response.status_code == 401
     assert docs_response.status_code == 401
     assert health_response.status_code == 200
-    assert health_response.json()["status"] in {"ok", "degraded"}
+    assert health_response.json()["status"] == "ok"
+    assert deep_health_response.status_code == 200
+    assert deep_health_response.json()["status"] in {"ok", "degraded"}
 
 
 def test_basic_auth_accepts_valid_credentials(monkeypatch) -> None:

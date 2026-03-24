@@ -124,6 +124,20 @@ def connect_sqlite(db_path: Path | None = None) -> sqlite3.Connection:
     return connection
 
 
+def ping_sqlite(db_path: Path | None = None) -> tuple[bool, str | None]:
+    """Return whether the configured SQLite database file is reachable."""
+    resolved_path = (db_path or get_default_db_path()).resolve()
+    resolved_path.parent.mkdir(parents=True, exist_ok=True)
+
+    try:
+        with sqlite3.connect(resolved_path, timeout=5) as connection:
+            connection.execute("SELECT 1").fetchone()
+    except Exception as exc:
+        return False, str(exc)
+
+    return True, None
+
+
 def _ensure_column(
     connection: sqlite3.Connection,
     *,

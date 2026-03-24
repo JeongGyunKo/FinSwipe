@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from app.db import get_database_backend, get_postgres_dsn
+from app.db import get_database_backend, get_postgres_dsn, initialize_database_backend
 from app.repositories.enrichment_repository import (
     EnrichmentRepository,
     InMemoryEnrichmentRepository,
@@ -15,6 +15,7 @@ from app.repositories.enrichment_repository import (
 def create_repository() -> EnrichmentRepository:
     """Build the configured repository implementation for the current environment."""
     backend = get_database_backend()
+    initialize_database_backend()
     if backend in {"postgres", "postgresql"}:
         dsn = get_postgres_dsn()
         if not dsn:

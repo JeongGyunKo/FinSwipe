@@ -10,10 +10,10 @@ from app.db import (
     connect_postgres,
     connect_sqlite,
     get_default_db_path,
-    initialize_postgres_database,
     initialize_sqlite_database,
 )
 from app.schemas.enrichment import ArticleEnrichmentRequest
+from app.schemas.enrichment import normalize_optional_text_input
 from app.schemas.ingestion import (
     EnrichmentJobRecord,
     EnrichmentJobStatus,
@@ -51,6 +51,16 @@ class EnrichmentRepository(Protocol):
 
     def get_latest_job(self, news_id: str) -> EnrichmentJobRecord | None:
         """Return the most recent job record for an article."""
+
+    def get_news_snapshot(
+        self,
+        news_id: str,
+    ) -> tuple[
+        ArticleEnrichmentRequest | None,
+        EnrichmentJobRecord | None,
+        EnrichmentStoragePayload | None,
+    ]:
+        """Return raw news, latest job, and enrichment result in one repository round trip."""
 
     def create_enrichment_job(
         self,
@@ -158,6 +168,20 @@ class InMemoryEnrichmentRepository:
         if not jobs:
             return None
         return max(jobs, key=lambda job: job.created_at)
+
+    def get_news_snapshot(
+        self,
+        news_id: str,
+    ) -> tuple[
+        ArticleEnrichmentRequest | None,
+        EnrichmentJobRecord | None,
+        EnrichmentStoragePayload | None,
+    ]:
+        return (
+            self.get_raw_news(news_id),
+            self.get_latest_job(news_id),
+            self.get_enrichment_result(news_id),
+        )
 
     def create_enrichment_job(
         self,
@@ -333,8 +357,8 @@ class SQLiteEnrichmentRepository:
     def upsert_raw_news(self, raw_news: ArticleEnrichmentRequest) -> None:
         now = _utc_now()
         tickers = raw_news.ticker or []
-        article_text = getattr(raw_news, "article_text", None)
-        summary_text = getattr(raw_news, "summary_text", None)
+        article_text = normalize_optional_text_input(getattr(raw_news, "article_text", None))
+        summary_text = normalize_optional_text_input(getattr(raw_news, "summary_text", None))
         with connect_sqlite(self.db_path) as connection:
             connection.execute("BEGIN IMMEDIATE")
             connection.execute(
@@ -470,6 +494,81 @@ class SQLiteEnrichmentRepository:
                 (news_id,),
             ).fetchone()
         return _job_from_row(row)
+
+    def get_news_snapshot(
+        self,
+        news_id: str,
+    ) -> tuple[
+        ArticleEnrichmentRequest | None,
+        EnrichmentJobRecord | None,
+        EnrichmentStoragePayload | None,
+    ]:
+        with connect_sqlite(self.db_path) as connection:
+            raw_news_row = connection.execute(
+                """
+                SELECT
+                    news_id,
+                    title,
+                    link,
+                    source,
+                    published_at,
+                    provided_article_text,
+                    provided_summary_text
+                FROM raw_news
+                WHERE news_id = ?
+                """,
+                (news_id,),
+            ).fetchone()
+            ticker_rows = (
+                connection.execute(
+                    """
+                    SELECT ticker
+                    FROM raw_news_tickers
+                    WHERE news_id = ?
+                    ORDER BY ticker ASC
+                    """,
+                    (news_id,),
+                ).fetchall()
+                if raw_news_row is not None
+                else []
+            )
+            latest_job_row = connection.execute(
+                """
+                SELECT *
+                FROM enrichment_jobs
+                WHERE news_id = ?
+                ORDER BY created_at DESC
+                LIMIT 1
+                """,
+                (news_id,),
+            ).fetchone()
+            enrichment_row = connection.execute(
+                """
+                SELECT payload_json
+                FROM enrichment_results
+                WHERE news_id = ?
+                """,
+                (news_id,),
+            ).fetchone()
+
+        raw_news = None
+        if raw_news_row is not None:
+            raw_news = _build_raw_news_request(
+                news_id=raw_news_row["news_id"],
+                title=raw_news_row["title"],
+                link=raw_news_row["link"],
+                ticker=[item["ticker"] for item in ticker_rows] or None,
+                source=raw_news_row["source"],
+                published_at=raw_news_row["published_at"],
+                article_text=raw_news_row["provided_article_text"],
+                summary_text=raw_news_row["provided_summary_text"],
+            )
+
+        enrichment = None
+        if enrichment_row is not None:
+            enrichment = _payload_from_storage(enrichment_row["payload_json"])
+
+        return raw_news, _job_from_row(latest_job_row), enrichment
 
     def create_enrichment_job(
         self,
@@ -804,13 +903,17 @@ class PostgresEnrichmentRepository:
     dsn: str | None = None
 
     def __post_init__(self) -> None:
-        self.dsn = initialize_postgres_database(self.dsn)
+        if not self.dsn:
+            raise RuntimeError(
+                "Postgres repository requires a DSN. "
+                "Set GENAI_POSTGRES_DSN or DATABASE_URL."
+            )
 
     def upsert_raw_news(self, raw_news: ArticleEnrichmentRequest) -> None:
         now = _utc_datetime()
         tickers = raw_news.ticker or []
-        article_text = getattr(raw_news, "article_text", None)
-        summary_text = getattr(raw_news, "summary_text", None)
+        article_text = normalize_optional_text_input(getattr(raw_news, "article_text", None))
+        summary_text = normalize_optional_text_input(getattr(raw_news, "summary_text", None))
         with connect_postgres(self.dsn) as connection:
             with connection.cursor() as cursor:
                 cursor.execute(
@@ -955,6 +1058,84 @@ class PostgresEnrichmentRepository:
                 )
                 row = cursor.fetchone()
         return _job_from_row(row)
+
+    def get_news_snapshot(
+        self,
+        news_id: str,
+    ) -> tuple[
+        ArticleEnrichmentRequest | None,
+        EnrichmentJobRecord | None,
+        EnrichmentStoragePayload | None,
+    ]:
+        with connect_postgres(self.dsn) as connection:
+            with connection.cursor() as cursor:
+                cursor.execute(
+                    """
+                    SELECT
+                        news_id,
+                        title,
+                        link,
+                        source,
+                        published_at,
+                        provided_article_text,
+                        provided_summary_text
+                    FROM raw_news
+                    WHERE news_id = %s
+                    """,
+                    (news_id,),
+                )
+                raw_news_row = cursor.fetchone()
+                ticker_rows = []
+                if raw_news_row is not None:
+                    cursor.execute(
+                        """
+                        SELECT ticker
+                        FROM raw_news_tickers
+                        WHERE news_id = %s
+                        ORDER BY ticker ASC
+                        """,
+                        (news_id,),
+                    )
+                    ticker_rows = cursor.fetchall()
+                cursor.execute(
+                    """
+                    SELECT *
+                    FROM enrichment_jobs
+                    WHERE news_id = %s
+                    ORDER BY created_at DESC
+                    LIMIT 1
+                    """,
+                    (news_id,),
+                )
+                latest_job_row = cursor.fetchone()
+                cursor.execute(
+                    """
+                    SELECT payload_json
+                    FROM enrichment_results
+                    WHERE news_id = %s
+                    """,
+                    (news_id,),
+                )
+                enrichment_row = cursor.fetchone()
+
+        raw_news = None
+        if raw_news_row is not None:
+            raw_news = _build_raw_news_request(
+                news_id=raw_news_row["news_id"],
+                title=raw_news_row["title"],
+                link=raw_news_row["link"],
+                ticker=[item["ticker"] for item in ticker_rows] or None,
+                source=raw_news_row["source"],
+                published_at=raw_news_row["published_at"],
+                article_text=raw_news_row["provided_article_text"],
+                summary_text=raw_news_row["provided_summary_text"],
+            )
+
+        enrichment = None
+        if enrichment_row is not None:
+            enrichment = _payload_from_storage(enrichment_row["payload_json"])
+
+        return raw_news, _job_from_row(latest_job_row), enrichment
 
     def create_enrichment_job(
         self,
@@ -1410,6 +1591,8 @@ def _build_raw_news_request(
     article_text: str | None,
     summary_text: str | None,
 ) -> ArticleEnrichmentRequest:
+    article_text = normalize_optional_text_input(article_text)
+    summary_text = normalize_optional_text_input(summary_text)
     if article_text or summary_text:
         return RawNewsIngestionRequest(
             news_id=news_id,

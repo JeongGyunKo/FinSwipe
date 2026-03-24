@@ -3,6 +3,7 @@ from __future__ import annotations
 from datetime import datetime, timezone
 
 from fastapi.testclient import TestClient
+from pydantic import ValidationError
 
 import app.api.routes.enrichment as enrichment_route_module
 import app.api.routes.ingestion as ingestion_route_module
@@ -388,6 +389,67 @@ def test_news_intake_accepts_text_alias_and_queues_direct_text(monkeypatch) -> N
     assert (
         worker_response.json()["enrichment"]["fetch_result"]["extraction_source"]
         == "provided_summary_text"
+    )
+
+
+def test_direct_text_request_rejects_empty_placeholder_summary() -> None:
+    try:
+        DirectTextEnrichmentRequest(
+            news_id="direct-text-empty-1",
+            title="Placeholder summary",
+            link="https://example.com/articles/direct-text-empty-1",
+            ticker=["AAPL"],
+            source="Licensed Provider",
+            summary_text="EMPTY",
+        )
+    except ValidationError as exc:
+        assert "Either article_text or summary_text must be provided." in str(exc)
+    else:
+        raise AssertionError("Expected EMPTY summary placeholder to be rejected.")
+
+
+def test_news_intake_treats_empty_placeholder_as_missing_text(monkeypatch) -> None:
+    repository = InMemoryEnrichmentRepository()
+    service = IngestionService(repository=repository)
+
+    def _run_and_persist(raw_news: ArticleEnrichmentRequest) -> EnrichmentStoragePayload:
+        payload = _build_completed_payload(raw_news)
+        repository.save_enrichment_result(
+            SaveEnrichmentRequest(raw_news=raw_news, enrichment=payload)
+        )
+        return payload
+
+    def _run_with_text_should_not_execute(*args, **kwargs):
+        raise AssertionError("summary_text='EMPTY' should not be treated as direct text.")
+
+    monkeypatch.setattr(ingestion_route_module, "service", service)
+    monkeypatch.setattr(service._orchestrator, "run", _run_and_persist)
+    monkeypatch.setattr(service._orchestrator, "run_with_text", _run_with_text_should_not_execute)
+
+    client = TestClient(app)
+    intake_response = client.post(
+        "/api/v1/news/intake",
+        json={
+            "news_id": "e2e-news-empty-placeholder-1",
+            "title": "Placeholder summary should crawl",
+            "link": "https://example.com/articles/e2e-news-empty-placeholder-1",
+            "ticker": ["AAPL"],
+            "source": "Licensed Provider",
+            "summary_text": "EMPTY",
+        },
+    )
+
+    assert intake_response.status_code == 200
+    assert intake_response.json()["queued"] is True
+
+    worker_response = client.post("/api/v1/jobs/process-next")
+    assert worker_response.status_code == 200
+    worker_payload = worker_response.json()
+    assert worker_payload["processed"] is True
+    assert worker_payload["analysis_status"] == "completed"
+    assert (
+        worker_payload["enrichment"]["fetch_result"]["extraction_source"]
+        == "paragraph_blocks"
     )
 
 
