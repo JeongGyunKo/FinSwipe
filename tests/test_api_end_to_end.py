@@ -9,7 +9,11 @@ import app.api.routes.ingestion as ingestion_route_module
 from app.main import app
 from app.repositories import InMemoryEnrichmentRepository, SaveEnrichmentRequest
 from app.schemas.article_fetch import ArticleFetchResult, ArticleFetchStatus, ArticleTextSource
-from app.schemas.enrichment import ArticleEnrichmentRequest, DirectTextEnrichmentRequest
+from app.schemas.enrichment import (
+    ArticleEnrichmentRequest,
+    DirectTextEnrichmentRequest,
+    FlexibleTextEnrichmentRequest,
+)
 from app.schemas.sentiment import (
     AggregationStrategy,
     ChunkSentimentResult,
@@ -236,6 +240,47 @@ def test_enrich_endpoint_returns_external_api_shape(monkeypatch) -> None:
     assert body["error"] is None
 
 
+def test_enrich_endpoint_accepts_text_alias_and_uses_direct_text(monkeypatch) -> None:
+    request = FlexibleTextEnrichmentRequest(
+        news_id="enrich-news-text-1",
+        title="Company beats earnings estimates",
+        link="https://example.com/articles/enrich-news-text-1",
+        ticker=["AAPL"],
+        source="Licensed Provider",
+        summary_text="Revenue growth stayed ahead of expectations.",
+    )
+    payload = _build_completed_payload(request)
+    payload.fetch_result.extraction_source = ArticleTextSource.PROVIDED_SUMMARY_TEXT
+
+    async def _enrich_article(_: FlexibleTextEnrichmentRequest):
+        return build_api_enrichment_response(payload)
+
+    monkeypatch.setattr(
+        enrichment_route_module.service,
+        "enrich_article",
+        _enrich_article,
+    )
+
+    client = TestClient(app)
+    response = client.post(
+        "/api/v1/articles/enrich",
+        json={
+            "news_id": "enrich-news-text-1",
+            "title": "Company beats earnings estimates",
+            "link": "https://example.com/articles/enrich-news-text-1",
+            "ticker": ["AAPL"],
+            "source": "Licensed Provider",
+            "text": "Revenue growth stayed ahead of expectations.",
+        },
+    )
+
+    assert response.status_code == 200
+    body = response.json()
+    assert body["status"] == "completed"
+    assert body["outcome"] == "success"
+    assert body["sentiment"]["label"] == "bullish"
+
+
 def test_news_intake_text_worker_and_status_flow(monkeypatch) -> None:
     repository = InMemoryEnrichmentRepository()
     service = IngestionService(repository=repository)
@@ -300,6 +345,50 @@ def test_news_intake_text_worker_and_status_flow(monkeypatch) -> None:
     stored_raw_news = repository.get_raw_news("e2e-news-text-1")
     assert stored_raw_news is not None
     assert not hasattr(stored_raw_news, "summary_text")
+
+
+def test_news_intake_accepts_text_alias_and_queues_direct_text(monkeypatch) -> None:
+    repository = InMemoryEnrichmentRepository()
+    service = IngestionService(repository=repository)
+
+    def _run_with_text_and_persist(
+        raw_news: ArticleEnrichmentRequest,
+        *,
+        article_text: str | None = None,
+        summary_text: str | None = None,
+    ) -> EnrichmentStoragePayload:
+        payload = _build_completed_payload(raw_news)
+        payload.fetch_result.extraction_source = ArticleTextSource.PROVIDED_SUMMARY_TEXT
+        repository.save_enrichment_result(
+            SaveEnrichmentRequest(raw_news=raw_news, enrichment=payload)
+        )
+        return payload
+
+    monkeypatch.setattr(ingestion_route_module, "service", service)
+    monkeypatch.setattr(service._orchestrator, "run_with_text", _run_with_text_and_persist)
+
+    client = TestClient(app)
+    intake_response = client.post(
+        "/api/v1/news/intake",
+        json={
+            "news_id": "e2e-news-text-legacy-1",
+            "title": "Company beats earnings estimates",
+            "link": "https://example.com/articles/e2e-news-text-legacy-1",
+            "ticker": ["AAPL"],
+            "source": "Licensed Provider",
+            "text": "Revenue growth stayed ahead of expectations.",
+        },
+    )
+
+    assert intake_response.status_code == 200
+    assert intake_response.json()["queued"] is True
+
+    worker_response = client.post("/api/v1/jobs/process-next")
+    assert worker_response.status_code == 200
+    assert (
+        worker_response.json()["enrichment"]["fetch_result"]["extraction_source"]
+        == "provided_summary_text"
+    )
 
 
 def test_enrich_text_endpoint_skips_remote_fetch(monkeypatch) -> None:

@@ -9,6 +9,7 @@ from app.schemas.enrichment import (
     ArticleEnrichmentRequest,
     ArticleEnrichmentResponse,
     DirectTextEnrichmentRequest,
+    FlexibleTextEnrichmentRequest,
     SchemaModel,
 )
 from app.schemas.storage import AnalysisOutcome, AnalysisStatus, EnrichmentStoragePayload
@@ -22,7 +23,7 @@ class EnrichmentJobStatus(str, Enum):
     FAILED = "failed"
 
 
-class RawNewsIngestionRequest(ArticleEnrichmentRequest):
+class RawNewsIngestionRequest(FlexibleTextEnrichmentRequest):
     """Inbound raw-news payload sent by the upstream backend/news ingestion system."""
 
 

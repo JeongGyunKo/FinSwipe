@@ -122,11 +122,11 @@ class IngestionService:
                 job=failed_job,
             )
 
-        if isinstance(raw_news, DirectTextIngestionRequest):
+        if self._has_direct_text(raw_news):
             enrichment = self._orchestrator.run_with_text(
                 raw_news,
-                article_text=raw_news.article_text,
-                summary_text=raw_news.summary_text,
+                article_text=getattr(raw_news, "article_text", None),
+                summary_text=getattr(raw_news, "summary_text", None),
             )
         else:
             enrichment = self._orchestrator.run(raw_news)
@@ -165,7 +165,7 @@ class IngestionService:
                 analysis_status=enrichment.analysis_status,
             )
 
-        if isinstance(raw_news, DirectTextIngestionRequest):
+        if self._has_direct_text(raw_news):
             self._repository.clear_raw_news_text_inputs(raw_news.news_id)
 
         return WorkerProcessResponse(
@@ -198,3 +198,10 @@ class IngestionService:
         attempt_index = max(job.attempts - 1, 0)
         delay_seconds = self._fetch_retry_policy.backoff_seconds(attempt_index)
         return datetime.now(timezone.utc) + timedelta(seconds=delay_seconds)
+
+    @staticmethod
+    def _has_direct_text(raw_news: RawNewsIngestionRequest | ArticleEnrichmentRequest) -> bool:
+        return bool(
+            (getattr(raw_news, "article_text", None) or "").strip()
+            or (getattr(raw_news, "summary_text", None) or "").strip()
+        )

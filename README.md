@@ -98,6 +98,8 @@ curl -X POST "http://127.0.0.1:8000/api/v1/articles/enrich-text" \
 
 You may also send `summary_text` when only a licensed summary/snippet is available.
 The service will analyze the provided text directly without fetching the original URL.
+For backwards compatibility, the existing `POST /api/v1/articles/enrich` endpoint also
+accepts a legacy `text` field and treats it as `summary_text`.
 
 If your backend prefers the existing async queue flow, use the intake endpoint below
 and then process the queued job with the worker just like URL-based ingestion:
@@ -118,6 +120,8 @@ curl -X POST "http://127.0.0.1:8000/api/v1/news/intake-text" \
 The worker will use the supplied text instead of crawling the URL, and the raw input
 text is cleared from the queued raw-news record after processing finishes so that the
 service retains metadata and derived analysis rather than provider-supplied body text.
+The existing `POST /api/v1/news/intake` endpoint also accepts the legacy `text` field
+and routes it through the same direct-text path.
 
 ## Domain Matrix
 

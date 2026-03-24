@@ -15,9 +15,9 @@ from app.db import (
 )
 from app.schemas.enrichment import ArticleEnrichmentRequest
 from app.schemas.ingestion import (
-    DirectTextIngestionRequest,
     EnrichmentJobRecord,
     EnrichmentJobStatus,
+    RawNewsIngestionRequest,
 )
 from app.schemas.mixed import TickerSentimentObservation
 from app.schemas.operations import (
@@ -122,7 +122,12 @@ class InMemoryEnrichmentRepository:
 
     def clear_raw_news_text_inputs(self, news_id: str) -> None:
         raw_news = self._raw_news_by_id.get(news_id)
-        if not isinstance(raw_news, DirectTextIngestionRequest):
+        if raw_news is None:
+            return
+        if not (
+            (getattr(raw_news, "article_text", None) or "").strip()
+            or (getattr(raw_news, "summary_text", None) or "").strip()
+        ):
             return
         self._raw_news_by_id[news_id] = ArticleEnrichmentRequest(
             news_id=raw_news.news_id,
@@ -328,16 +333,8 @@ class SQLiteEnrichmentRepository:
     def upsert_raw_news(self, raw_news: ArticleEnrichmentRequest) -> None:
         now = _utc_now()
         tickers = raw_news.ticker or []
-        article_text = (
-            raw_news.article_text
-            if isinstance(raw_news, DirectTextIngestionRequest)
-            else None
-        )
-        summary_text = (
-            raw_news.summary_text
-            if isinstance(raw_news, DirectTextIngestionRequest)
-            else None
-        )
+        article_text = getattr(raw_news, "article_text", None)
+        summary_text = getattr(raw_news, "summary_text", None)
         with connect_sqlite(self.db_path) as connection:
             connection.execute("BEGIN IMMEDIATE")
             connection.execute(
@@ -812,16 +809,8 @@ class PostgresEnrichmentRepository:
     def upsert_raw_news(self, raw_news: ArticleEnrichmentRequest) -> None:
         now = _utc_datetime()
         tickers = raw_news.ticker or []
-        article_text = (
-            raw_news.article_text
-            if isinstance(raw_news, DirectTextIngestionRequest)
-            else None
-        )
-        summary_text = (
-            raw_news.summary_text
-            if isinstance(raw_news, DirectTextIngestionRequest)
-            else None
-        )
+        article_text = getattr(raw_news, "article_text", None)
+        summary_text = getattr(raw_news, "summary_text", None)
         with connect_postgres(self.dsn) as connection:
             with connection.cursor() as cursor:
                 cursor.execute(
@@ -1422,7 +1411,7 @@ def _build_raw_news_request(
     summary_text: str | None,
 ) -> ArticleEnrichmentRequest:
     if article_text or summary_text:
-        return DirectTextIngestionRequest(
+        return RawNewsIngestionRequest(
             news_id=news_id,
             title=title,
             link=link,

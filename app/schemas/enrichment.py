@@ -105,7 +105,7 @@ class ArticleEnrichmentRequest(SchemaModel):
         return normalized or None
 
 
-class DirectTextEnrichmentRequest(ArticleEnrichmentRequest):
+class FlexibleTextEnrichmentRequest(ArticleEnrichmentRequest):
     article_text: str | None = Field(
         default=None,
         min_length=1,
@@ -114,12 +114,24 @@ class DirectTextEnrichmentRequest(ArticleEnrichmentRequest):
     summary_text: str | None = Field(
         default=None,
         min_length=1,
+        validation_alias=AliasChoices("summary_text", "text"),
         description="Licensed summary/snippet text supplied directly by the upstream provider.",
     )
 
+    @property
+    def has_direct_text(self) -> bool:
+        return bool((self.article_text or "").strip() or (self.summary_text or "").strip())
+
+    @property
+    def resolved_direct_text(self) -> str | None:
+        return (self.article_text or "").strip() or (self.summary_text or "").strip() or None
+
+
+class DirectTextEnrichmentRequest(FlexibleTextEnrichmentRequest):
+
     @model_validator(mode="after")
     def validate_text_input(self) -> DirectTextEnrichmentRequest:
-        if not (self.article_text or self.summary_text):
+        if not self.has_direct_text:
             raise ValueError("Either article_text or summary_text must be provided.")
         return self
 

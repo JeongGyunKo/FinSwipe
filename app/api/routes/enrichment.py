@@ -1,9 +1,9 @@
 from fastapi import APIRouter
 
 from app.schemas.enrichment import (
-    ArticleEnrichmentRequest,
     ArticleEnrichmentResponse,
     DirectTextEnrichmentRequest,
+    FlexibleTextEnrichmentRequest,
 )
 from app.services.enrichment_service import EnrichmentService
 
@@ -18,7 +18,7 @@ service = EnrichmentService()
     summary="Enrich a financial news article",
 )
 async def enrich_article(
-    payload: ArticleEnrichmentRequest,
+    payload: FlexibleTextEnrichmentRequest,
 ) -> ArticleEnrichmentResponse:
     return await service.enrich_article(payload)
 

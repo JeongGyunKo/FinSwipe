@@ -5,6 +5,7 @@ from app.schemas.enrichment import (
     DirectTextEnrichmentRequest,
     EnrichmentStatus,
     ErrorDetail,
+    FlexibleTextEnrichmentRequest,
     InternalStageStatus,
     MixedConflictPayload,
     SentimentLabel,
@@ -31,9 +32,16 @@ class EnrichmentService:
 
     async def enrich_article(
         self,
-        payload: ArticleEnrichmentRequest,
+        payload: FlexibleTextEnrichmentRequest,
     ) -> ArticleEnrichmentResponse:
-        storage_payload = self._orchestrator.run(payload)
+        if payload.has_direct_text:
+            storage_payload = self._orchestrator.run_with_text(
+                payload,
+                article_text=payload.article_text,
+                summary_text=payload.summary_text,
+            )
+        else:
+            storage_payload = self._orchestrator.run(payload)
         return build_api_enrichment_response(storage_payload)
 
     async def enrich_article_text(
