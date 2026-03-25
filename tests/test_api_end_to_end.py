@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 from dataclasses import replace
 
 from fastapi.testclient import TestClient
@@ -8,6 +8,7 @@ from pydantic import ValidationError
 
 import app.api.routes.enrichment as enrichment_route_module
 import app.api.routes.ingestion as ingestion_route_module
+import app.services.enrichment_service as enrichment_service_module
 from app.main import app
 from app.repositories import InMemoryEnrichmentRepository, SaveEnrichmentRequest
 from app.schemas.article_fetch import ArticleFetchResult, ArticleFetchStatus, ArticleTextSource
@@ -16,6 +17,7 @@ from app.schemas.enrichment import (
     DirectTextEnrichmentRequest,
     FlexibleTextEnrichmentRequest,
 )
+from app.schemas.ingestion import EnrichmentJobRecord, EnrichmentJobStatus
 from app.schemas.sentiment import (
     AggregationStrategy,
     ChunkSentimentResult,
@@ -504,41 +506,79 @@ def test_enrich_text_endpoint_skips_remote_fetch(monkeypatch) -> None:
     assert body["sentiment"]["label"] == "bullish"
 
 
-def test_direct_enrichment_endpoints_are_disabled_on_render_web(monkeypatch) -> None:
-    monkeypatch.setattr(
-        enrichment_route_module,
-        "settings",
-        replace(enrichment_route_module.settings, enable_direct_enrichment_api=False),
+def test_direct_enrichment_uses_worker_backed_queue_on_render(monkeypatch) -> None:
+    request = ArticleEnrichmentRequest(
+        news_id="render-queued-enrich-1",
+        title="Queued direct enrich",
+        link="https://example.com/articles/render-queued-enrich-1",
+        ticker=["AAPL"],
+        source="Reuters",
     )
+    payload = _build_completed_payload(request)
+    now = datetime.now(timezone.utc)
+    active_job = EnrichmentJobRecord(
+        job_id="render-job-1",
+        news_id=request.news_id,
+        status=EnrichmentJobStatus.QUEUED,
+        attempts=0,
+        max_attempts=3,
+        last_error=None,
+        last_analysis_status=None,
+        created_at=now,
+        updated_at=now,
+        next_retry_at=None,
+        started_at=None,
+        completed_at=None,
+    )
+    completed_job = active_job.model_copy(
+        update={
+            "status": EnrichmentJobStatus.COMPLETED,
+            "attempts": 1,
+            "updated_at": now + timedelta(seconds=1),
+            "started_at": now,
+            "completed_at": now + timedelta(seconds=1),
+            "last_analysis_status": AnalysisStatus.COMPLETED,
+        }
+    )
+
+    class FakeRepository:
+        def upsert_raw_news(self, raw_news) -> None:
+            return None
+
+        def get_active_job(self, news_id: str):
+            return active_job
+
+        def get_news_snapshot(self, news_id: str):
+            return request, completed_job, payload
+
+    service = enrichment_route_module.EnrichmentService(repository=FakeRepository())
+
+    monkeypatch.setattr(enrichment_route_module, "service", service)
+    monkeypatch.setattr(
+        enrichment_service_module,
+        "settings",
+        replace(
+            enrichment_service_module.settings,
+            use_worker_backed_direct_enrichment=True,
+                direct_enrichment_wait_timeout_seconds=0.1,
+                direct_enrichment_poll_interval_seconds=0.01,
+            ),
+        )
 
     client = TestClient(app)
-
-    enrich_response = client.post(
+    response = client.post(
         "/api/v1/articles/enrich",
         json={
-            "news_id": "render-disabled-enrich-1",
-            "title": "Direct enrich disabled on render",
-            "link": "https://example.com/articles/render-disabled-enrich-1",
-            "ticker": ["AAPL"],
-            "source": "Reuters",
-        },
-    )
-    enrich_text_response = client.post(
-        "/api/v1/articles/enrich-text",
-        json={
-            "news_id": "render-disabled-enrich-text-1",
-            "title": "Direct enrich-text disabled on render",
-            "link": "https://example.com/articles/render-disabled-enrich-text-1",
-            "ticker": ["AAPL"],
-            "source": "Reuters",
-            "article_text": "Revenue growth stayed ahead of expectations.",
+            "news_id": request.news_id,
+            "title": request.title,
+            "link": str(request.link),
+            "ticker": request.ticker,
+            "source": request.source,
         },
     )
 
-    assert enrich_response.status_code == 503
-    assert "Direct enrichment APIs are disabled" in enrich_response.json()["detail"]
-    assert enrich_text_response.status_code == 503
-    assert "Direct enrichment APIs are disabled" in enrich_text_response.json()["detail"]
+    assert response.status_code == 200
+    assert response.json()["status"] == "completed"
 
 
 def test_process_next_endpoint_is_disabled_on_render_web(monkeypatch) -> None:

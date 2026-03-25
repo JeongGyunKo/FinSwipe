@@ -1,5 +1,9 @@
 import asyncio
+from time import monotonic
 
+from fastapi import HTTPException
+
+from app.core import get_settings
 from app.repositories import EnrichmentRepository, create_repository
 from app.schemas.enrichment import (
     ArticleEnrichmentRequest,
@@ -19,9 +23,12 @@ from app.schemas.enrichment import (
     XAIPayload,
 )
 from app.schemas.mixed import ArticleMixedDetectionResult
+from app.schemas.ingestion import EnrichmentJobStatus
 from app.schemas.storage import AnalysisOutcome, AnalysisStatus, EnrichmentStoragePayload
 from app.schemas.xai import XAIContributionDirection, XAIResult
 from app.services.orchestrator import EnrichmentOrchestrator
+
+settings = get_settings()
 
 
 class EnrichmentService:
@@ -50,6 +57,9 @@ class EnrichmentService:
         self,
         payload: FlexibleTextEnrichmentRequest,
     ) -> ArticleEnrichmentResponse:
+        if settings.use_worker_backed_direct_enrichment:
+            storage_payload = await self._enqueue_and_wait_for_enrichment(payload)
+            return build_api_enrichment_response(storage_payload)
         if payload.has_direct_text:
             storage_payload = await asyncio.to_thread(
                 self.orchestrator.run_with_text,
@@ -65,6 +75,9 @@ class EnrichmentService:
         self,
         payload: DirectTextEnrichmentRequest,
     ) -> ArticleEnrichmentResponse:
+        if settings.use_worker_backed_direct_enrichment:
+            storage_payload = await self._enqueue_and_wait_for_enrichment(payload)
+            return build_api_enrichment_response(storage_payload)
         storage_payload = await asyncio.to_thread(
             self.orchestrator.run_with_text,
             payload,
@@ -72,6 +85,55 @@ class EnrichmentService:
             summary_text=payload.summary_text,
         )
         return build_api_enrichment_response(storage_payload)
+
+    async def _enqueue_and_wait_for_enrichment(
+        self,
+        payload: FlexibleTextEnrichmentRequest,
+    ) -> EnrichmentStoragePayload:
+        await asyncio.to_thread(self.repository.upsert_raw_news, payload)
+
+        active_job = await asyncio.to_thread(self.repository.get_active_job, payload.news_id)
+        if active_job is not None:
+            awaited_job_id = active_job.job_id
+        else:
+            created_job = await asyncio.to_thread(
+                self.repository.create_enrichment_job,
+                payload.news_id,
+            )
+            awaited_job_id = created_job.job_id
+
+        deadline = monotonic() + settings.direct_enrichment_wait_timeout_seconds
+        while monotonic() < deadline:
+            _, latest_job, enrichment = await asyncio.to_thread(
+                self.repository.get_news_snapshot,
+                payload.news_id,
+            )
+
+            if latest_job is None or latest_job.job_id != awaited_job_id:
+                await asyncio.sleep(settings.direct_enrichment_poll_interval_seconds)
+                continue
+
+            if latest_job.status in {
+                EnrichmentJobStatus.COMPLETED,
+                EnrichmentJobStatus.FAILED,
+            }:
+                if enrichment is not None:
+                    return enrichment
+                raise HTTPException(
+                    status_code=500,
+                    detail=latest_job.last_error
+                    or "Worker finished the enrichment job without a stored result.",
+                )
+
+            await asyncio.sleep(settings.direct_enrichment_poll_interval_seconds)
+
+        raise HTTPException(
+            status_code=503,
+            detail=(
+                "Timed out waiting for the worker to complete the direct enrichment request. "
+                "The job is still queued or processing."
+            ),
+        )
 
 
 def build_api_enrichment_response(

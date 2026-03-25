@@ -20,7 +20,9 @@ class AppSettings:
     app_port: int
     worker_poll_interval_seconds: float
     enable_job_process_api: bool
-    enable_direct_enrichment_api: bool
+    use_worker_backed_direct_enrichment: bool
+    direct_enrichment_wait_timeout_seconds: float
+    direct_enrichment_poll_interval_seconds: float
     basic_auth_user: str | None
     basic_auth_password: str | None
 
@@ -47,9 +49,15 @@ def get_settings() -> AppSettings:
             "GENAI_ENABLE_JOB_PROCESS_API",
             default=not running_on_render,
         ),
-        enable_direct_enrichment_api=_env_flag(
-            "GENAI_ENABLE_DIRECT_ENRICHMENT_API",
-            default=not running_on_render,
+        use_worker_backed_direct_enrichment=_env_flag(
+            "GENAI_USE_WORKER_FOR_DIRECT_ENRICHMENT",
+            default=running_on_render,
+        ),
+        direct_enrichment_wait_timeout_seconds=float(
+            os.getenv("GENAI_DIRECT_ENRICHMENT_WAIT_TIMEOUT", "30")
+        ),
+        direct_enrichment_poll_interval_seconds=float(
+            os.getenv("GENAI_DIRECT_ENRICHMENT_POLL_INTERVAL", "0.5")
         ),
         basic_auth_user=os.getenv("BASIC_AUTH_USER"),
         basic_auth_password=os.getenv("BASIC_AUTH_PASSWORD"),

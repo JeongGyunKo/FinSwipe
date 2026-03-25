@@ -1,6 +1,5 @@
-from fastapi import APIRouter, HTTPException
+from fastapi import APIRouter
 
-from app.core import get_settings
 from app.schemas.enrichment import (
     ArticleEnrichmentResponse,
     DirectTextEnrichmentRequest,
@@ -11,20 +10,6 @@ from app.services.enrichment_service import EnrichmentService
 
 router = APIRouter(tags=["enrichment"])
 service = EnrichmentService()
-settings = get_settings()
-
-
-def _ensure_direct_enrichment_enabled() -> None:
-    if settings.enable_direct_enrichment_api:
-        return
-    raise HTTPException(
-        status_code=503,
-        detail=(
-            "Direct enrichment APIs are disabled on this web service instance. "
-            "Submit work through /api/v1/news/intake or /api/v1/news/intake-text "
-            "and let the dedicated worker service process the job."
-        ),
-    )
 
 
 @router.post(
@@ -35,7 +20,6 @@ def _ensure_direct_enrichment_enabled() -> None:
 async def enrich_article(
     payload: FlexibleTextEnrichmentRequest,
 ) -> ArticleEnrichmentResponse:
-    _ensure_direct_enrichment_enabled()
     return await service.enrich_article(payload)
 
 
@@ -47,5 +31,4 @@ async def enrich_article(
 async def enrich_article_text(
     payload: DirectTextEnrichmentRequest,
 ) -> ArticleEnrichmentResponse:
-    _ensure_direct_enrichment_enabled()
     return await service.enrich_article_text(payload)
