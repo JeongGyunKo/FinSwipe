@@ -1,43 +1,62 @@
 # Financial News Gen AI Service
 
-FastAPI-based enrichment service for financial news articles. The service accepts article metadata from a backend system, fetches article content from the original link, and produces AI-enriched analysis such as summary, sentiment, XAI, and mixed/conflict flags.
+금융 뉴스 기사에 대해 요약, 감성 분석, XAI 하이라이트, 혼합 신호 감지를 수행하는 FastAPI 기반 분석 서비스입니다. 백엔드에서 기사 메타데이터 또는 직접 제공된 텍스트를 전달하면, 서비스가 이를 저장하고 분석 결과를 반환합니다.
 
-## Local Postgres Setup
+## 핵심 기능
 
-1. Copy `.env.example` to `.env`
-2. Start Postgres
+- 기사 URL 기반 수집 및 분석
+- `article_text` / `summary_text` 직접 입력 기반 분석
+- 비동기 job 큐 처리
+- 3줄 요약 생성
+- 감성 분석 및 XAI 하이라이트 생성
+- 혼합/충돌 신호 탐지
+
+## 권장 실행 구조
+
+운영 환경에서는 웹 서버와 worker를 분리하는 것을 권장합니다.
+
+- 웹 서버: 요청 수신, job 생성, 결과 조회
+- worker: 기사 fetch, 정제, 요약, 감성 분석, XAI, 저장
+
+로컬 개발은 한 프로젝트 안에서 두 프로세스로 실행하면 됩니다.
+
+## 로컬 Postgres 실행
+
+1. `.env.example`을 `.env`로 복사합니다.
+2. 필요한 값을 로컬 환경에 맞게 수정합니다.
+3. Postgres를 실행합니다.
 
 ```bash
 docker compose up -d postgres
 ```
 
-3. Install dependencies
+4. 의존성을 설치합니다.
 
 ```bash
 pip install -e .
 ```
 
-4. Run the API
+5. API 서버를 실행합니다.
 
 ```bash
 uvicorn app.main:app --host 127.0.0.1 --port 8000 --reload
 ```
 
-5. Run the worker in a separate terminal
+6. 다른 터미널에서 worker를 실행합니다.
 
 ```bash
 python3 -m app.workers.enrichment_worker --poll-interval 5
 ```
 
-## Database Check
+## DB 설정 점검
 
-You can validate the current DB backend setup without starting the full API:
+전체 API를 띄우지 않고 현재 DB 설정만 빠르게 확인할 수 있습니다.
 
 ```bash
 python3 -m app.db.check
 ```
 
-Example output:
+예시 출력:
 
 ```json
 {
@@ -49,39 +68,29 @@ Example output:
 }
 ```
 
-If you do not have Docker locally, you can still use the same command after starting Postgres with Homebrew or Postgres.app.
+## 주요 API 흐름
 
-## Smoke Test
+### 1. 비동기 큐 기반 처리
 
-You can run a quick BE-style smoke test against a running API instance:
+백엔드에서 기사 메타데이터를 저장하고, worker가 뒤에서 분석을 처리하는 흐름입니다.
 
-```bash
-python3 scripts/smoke_test_enrichment.py \
-  --title "Apple shares rise after earnings" \
-  --link "https://example.com/article" \
-  --ticker AAPL \
-  --source Reuters
-```
+- `POST /api/v1/news/intake`
+- `POST /api/v1/news/intake-text`
+- `GET /api/v1/news/{news_id}`
+- `GET /api/v1/news/{news_id}/result`
 
-What it does:
-- calls `POST /api/v1/news/intake`
-- optionally calls `POST /api/v1/jobs/process-next`
-- calls `GET /api/v1/news/{news_id}`
-- prints the full JSON result for quick debugging
+### 2. 직접 분석 요청
 
-Useful flags:
-- `--base-url http://127.0.0.1:8000`
-- `--skip-worker`
-- `--poll-seconds 2`
-- `--news-id custom-id-123`
+직접 분석 API는 요청을 받아 내부적으로 분석 결과를 기다려 응답합니다.
 
-Detailed validation checklist:
-- [`docs/smoke_test_checklist.md`](/Users/sta/Documents/개발1/docs/smoke_test_checklist.md)
+- `POST /api/v1/articles/enrich`
+- `POST /api/v1/articles/enrich-text`
 
-## Direct Text Enrichment
+환경에 따라 `GENAI_USE_WORKER_FOR_DIRECT_ENRICHMENT=true` 이면 worker가 job을 처리해야 결과가 반환됩니다.
 
-If your upstream news provider can send licensed `article_text` or `summary_text`
-directly, you can skip URL crawling entirely and call:
+## 직접 텍스트 분석 예시
+
+라이선스된 본문 또는 요약문을 직접 받을 수 있다면 URL 크롤링 없이 바로 분석할 수 있습니다.
 
 ```bash
 curl -X POST "http://127.0.0.1:8000/api/v1/articles/enrich-text" \
@@ -96,13 +105,9 @@ curl -X POST "http://127.0.0.1:8000/api/v1/articles/enrich-text" \
   }'
 ```
 
-You may also send `summary_text` when only a licensed summary/snippet is available.
-The service will analyze the provided text directly without fetching the original URL.
-For backwards compatibility, the existing `POST /api/v1/articles/enrich` endpoint also
-accepts a legacy `text` field and treats it as `summary_text`.
+`summary_text`만 있는 경우에도 요청할 수 있습니다. 기존 레거시 호환을 위해 `text` 필드도 `summary_text`로 해석합니다.
 
-If your backend prefers the existing async queue flow, use the intake endpoint below
-and then process the queued job with the worker just like URL-based ingestion:
+비동기 큐 흐름을 쓰려면 아래처럼 저장 후 worker가 처리하게 할 수 있습니다.
 
 ```bash
 curl -X POST "http://127.0.0.1:8000/api/v1/news/intake-text" \
@@ -117,15 +122,39 @@ curl -X POST "http://127.0.0.1:8000/api/v1/news/intake-text" \
   }'
 ```
 
-The worker will use the supplied text instead of crawling the URL, and the raw input
-text is cleared from the queued raw-news record after processing finishes so that the
-service retains metadata and derived analysis rather than provider-supplied body text.
-The existing `POST /api/v1/news/intake` endpoint also accepts the legacy `text` field
-and routes it through the same direct-text path.
+## 스모크 테스트
 
-## Domain Matrix
+실행 중인 API에 대해 BE 관점의 빠른 점검을 할 수 있습니다.
 
-You can save smoke test outputs and aggregate them into a domain-level matrix:
+```bash
+python3 scripts/smoke_test_enrichment.py \
+  --title "Apple shares rise after earnings" \
+  --link "https://example.com/article" \
+  --ticker AAPL \
+  --source Reuters
+```
+
+수행 내용:
+
+- `POST /api/v1/news/intake`
+- 필요 시 `POST /api/v1/jobs/process-next`
+- `GET /api/v1/news/{news_id}`
+- 전체 JSON 결과 출력
+
+자주 쓰는 옵션:
+
+- `--base-url http://127.0.0.1:8000`
+- `--skip-worker`
+- `--poll-seconds 2`
+- `--news-id custom-id-123`
+
+상세 점검 문서:
+
+- [`docs/smoke_test_checklist.md`](/Users/sta/Documents/개발1/docs/smoke_test_checklist.md)
+
+## 도메인 매트릭스
+
+스모크 테스트 결과를 저장한 뒤 도메인별 품질 매트릭스를 만들 수 있습니다.
 
 ```bash
 python3 scripts/smoke_test_enrichment.py \
@@ -139,15 +168,16 @@ python3 scripts/smoke_test_enrichment.py \
 python3 scripts/build_domain_matrix.py results/*.json --format table
 ```
 
-This helps you see, by domain:
-- success vs fatal failure rates
-- which extraction paths are being used
-- which failure categories are recurring
-- recommended support tier: `primary`, `secondary`, `blocked`, or `investigate`
+확인 가능한 항목:
 
-## Smoke Suite
+- 도메인별 성공/실패 비율
+- 실제 사용된 추출 경로
+- 반복되는 실패 유형
+- 지원 권장 등급: `primary`, `secondary`, `blocked`, `investigate`
 
-You can run multiple links from a JSON config and save all results automatically:
+## 스모크 스위트
+
+여러 링크를 한 번에 점검하고 결과를 저장할 수 있습니다.
 
 ```json
 [
@@ -166,42 +196,57 @@ python3 scripts/run_smoke_suite.py \
   --output-dir results
 ```
 
-This writes:
-- one JSON file per article
+생성 결과:
+
+- 기사별 JSON 결과 파일
 - `results/suite_summary.json`
 - `results/suite_summary.md`
 
-It also prints the aggregated domain matrix immediately.
-
-## Required Environment Variables
+## 주요 환경변수
 
 - `GENAI_DATABASE_BACKEND`
-  - `sqlite` or `postgres`
+  - `sqlite` 또는 `postgres`
 - `GENAI_POSTGRES_DSN`
-  - required when `GENAI_DATABASE_BACKEND=postgres`
+  - `GENAI_DATABASE_BACKEND=postgres`일 때 필요
 - `GENAI_SQLITE_DB_PATH`
-  - optional when using SQLite
+  - SQLite 사용 시 선택
+- `GENAI_WORKER_POLL_INTERVAL`
+  - worker polling 간격
+- `GENAI_ENABLE_JOB_PROCESS_API`
+  - 웹 API에서 `process-next`를 허용할지 여부
+- `GENAI_USE_WORKER_FOR_DIRECT_ENRICHMENT`
+  - 직접 분석 API를 worker-backed 방식으로 처리할지 여부
+- `GENAI_DIRECT_ENRICHMENT_WAIT_TIMEOUT`
+  - 직접 분석 요청 대기 timeout
+- `GENAI_DIRECT_ENRICHMENT_POLL_INTERVAL`
+  - 직접 분석 요청 대기 polling 간격
 - `BASIC_AUTH_USER`
-  - optional, enable HTTP Basic Auth when set together with `BASIC_AUTH_PASSWORD`
 - `BASIC_AUTH_PASSWORD`
-  - optional, enable HTTP Basic Auth when set together with `BASIC_AUTH_USER`
 
-When Basic Auth is enabled:
-- `/health` stays open for Render health checks
-- `/`, `/docs`, `/openapi.json`, `/api/v1/*`, and static assets require credentials
+Basic Auth를 켜면:
 
-This is useful for short-lived private sharing on Render without building a full login system.
+- `/health`와 `/health/deep`는 열려 있음
+- `/`, `/docs`, `/openapi.json`, `/api/v1/*`, 정적 자산은 인증 필요
 
-## Health Check
+## 헬스 체크
 
-`GET /health`
+### `GET /health`
 
-Returns:
-- app status
-- active database backend
-- database connectivity result
+가벼운 생존 확인용 엔드포인트입니다.
 
-Example response:
+예시:
+
+```json
+{
+  "status": "ok"
+}
+```
+
+### `GET /health/deep`
+
+DB 연결 여부까지 포함한 상세 점검 엔드포인트입니다.
+
+예시:
 
 ```json
 {
@@ -211,3 +256,10 @@ Example response:
   "database_error": null
 }
 ```
+
+## 보안 주의사항
+
+- `.env`, 비밀키, 토큰, DB 비밀번호는 절대 저장소에 커밋하지 마세요.
+- 운영 secret은 GitHub가 아니라 배포 플랫폼 환경변수에만 저장하세요.
+- public 저장소로 전환할 경우, 현재 파일뿐 아니라 과거 git history에도 secret이 없었는지 다시 확인하세요.
+- `summary_text`나 `article_text`에 `EMPTY`, `N/A`, `NULL`, `NONE`, `-` 같은 placeholder를 넣으면 실제 텍스트가 아닌 빈값으로 처리됩니다.
