@@ -1,15 +1,21 @@
-export type SentimentType = 'POSITIVE' | 'NEGATIVE' | 'NEUTRAL';
+export type SentimentLabel = 'Positive' | 'Negative' | 'Neutral' | 'Mixed';
 
+//뉴스
 export interface NewsCardData {
-  briefingId: string;
-  newsId: string;
-  ticker: string;
-  summary: string[]; // ["줄1", "줄2", "줄3"]
-  sentimentTag: SentimentType;
-  publishedAt: string;
+  id: string;                // uuid
+  headline: string;          // 제목
+  summary: string;           // 전체 요약 텍스트
+  summary_3lines: string[];  // jsonb (3줄 요약 배열)
+  source_url: string;        // 원문 링크
+  tickers: string[];          // 관련 종목 (배열)
+  sentiment_label: SentimentLabel;
+  sentiment_score: number;
+  published_at: string;      // 날짜
+  categories: string[];      // 카테고리
 }
 
-export interface BriefingResponse {
-  userId: string;
-  cards: NewsCardData[];
+//티커별로 데이터 묶기
+export interface TickerGroup {
+  tickerName: string;
+  articles: NewsCardData[];
 }
