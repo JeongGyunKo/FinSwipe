@@ -43,7 +43,12 @@ def test_orchestrator_marks_partial_failure_when_xai_stage_fails(monkeypatch) ->
     )
     monkeypatch.setattr(
         "app.services.orchestrator.pipeline.validate_article_text",
-        lambda text: SimpleNamespace(is_valid=True, reason=None),
+        lambda text: SimpleNamespace(
+            is_valid=True,
+            reason=None,
+            word_count=16,
+            character_count=len(text),
+        ),
     )
     monkeypatch.setattr(
         "app.services.orchestrator.pipeline.summarize_to_three_lines",
@@ -127,7 +132,7 @@ def test_orchestrator_marks_partial_failure_when_xai_stage_fails(monkeypatch) ->
     )
 
     repository = InMemoryEnrichmentRepository()
-    orchestrator = EnrichmentOrchestrator(repository=repository)
+    orchestrator = EnrichmentOrchestrator(repository=repository, include_xai=True)
     request = ArticleEnrichmentRequest(
         news_id="news-1",
         title="Revenue rises on stronger demand",
@@ -146,3 +151,130 @@ def test_orchestrator_marks_partial_failure_when_xai_stage_fails(monkeypatch) ->
     assert any("xai unavailable" in error.message.lower() for error in payload.errors)
     assert payload.sentiment is not None
     assert payload.article_mixed is not None
+
+
+def test_orchestrator_skips_xai_in_base_pipeline_by_default(monkeypatch) -> None:
+    monkeypatch.setattr(
+        "app.services.orchestrator.pipeline.fetch_article_text",
+        lambda link: ArticleFetchResult(
+            link=link,
+            raw_text="Revenue rose 12% year over year. Margins improved in the quarter.",
+            cleaned_text="",
+            fetch_status=ArticleFetchStatus.SUCCESS,
+            error_message=None,
+        ),
+    )
+    monkeypatch.setattr(
+        "app.services.orchestrator.pipeline.clean_article_text",
+        lambda text: "Revenue rose 12% year over year. Margins improved in the quarter. Outlook was raised for the year.",
+    )
+    monkeypatch.setattr(
+        "app.services.orchestrator.pipeline.validate_article_text",
+        lambda text: SimpleNamespace(
+            is_valid=True,
+            reason=None,
+            word_count=16,
+            character_count=len(text),
+        ),
+    )
+    monkeypatch.setattr(
+        "app.services.orchestrator.pipeline.summarize_to_three_lines",
+        lambda title, article_text: ["line 1", "line 2", "line 3"],
+    )
+    monkeypatch.setattr(
+        "app.services.orchestrator.pipeline.analyze_sentiment",
+        lambda title, article_text: SentimentResult(
+            label=FinBERTSentimentLabel.POSITIVE,
+            score=62.0,
+            confidence=0.84,
+            probabilities=SentimentProbabilities(
+                positive=0.8,
+                neutral=0.15,
+                negative=0.05,
+            ),
+            aggregation_strategy=AggregationStrategy.WEIGHTED_MEAN,
+            chunk_results=[
+                ChunkSentimentResult(
+                    chunk_index=0,
+                    source=SentimentChunkSource.BODY,
+                    text="Revenue rose 12% year over year.",
+                    token_count=18,
+                    weight=1.0,
+                    label=FinBERTSentimentLabel.POSITIVE,
+                    score=62.0,
+                    confidence=0.84,
+                    probabilities=SentimentProbabilities(
+                        positive=0.8,
+                        neutral=0.15,
+                        negative=0.05,
+                    ),
+                )
+            ],
+            disagreement_ratio=0.0,
+            chunk_count=1,
+        ),
+    )
+    monkeypatch.setattr(
+        "app.services.orchestrator.pipeline.explain_sentiment",
+        lambda title, article_text: (_ for _ in ()).throw(
+            AssertionError("Base pipeline should not call XAI when inline XAI is disabled.")
+        ),
+    )
+    monkeypatch.setattr(
+        "app.services.orchestrator.pipeline.detect_article_level_mixed",
+        lambda sentiment_result: ArticleMixedDetectionResult(
+            status=MixedStatus.CLEAR,
+            is_mixed=False,
+            has_conflicting_signals=False,
+            dominant_sentiment=FinBERTSentimentLabel.POSITIVE,
+            score=sentiment_result.score,
+            confidence=sentiment_result.confidence,
+            disagreement_ratio=sentiment_result.disagreement_ratio,
+            triggered_reason_codes=[],
+            reasons=[],
+            thresholds=ArticleMixedConfig(),
+        ),
+    )
+    monkeypatch.setattr(
+        "app.services.orchestrator.pipeline.detect_ticker_level_mixed",
+        lambda **kwargs: TickerMixedDetectionResult(
+            ticker="AAPL",
+            status=MixedStatus.INSUFFICIENT_DATA,
+            is_mixed=False,
+            article_count=1,
+            lookback_start=datetime.now(timezone.utc),
+            lookback_end=datetime.now(timezone.utc),
+            mean_score=62.0,
+            score_stddev=0.0,
+            sentiment_distribution=TickerSentimentDistribution(
+                positive_count=1,
+                neutral_count=0,
+                negative_count=0,
+            ),
+            positive_ratio=1.0,
+            negative_ratio=0.0,
+            triggered_reason_codes=[],
+            reasons=[],
+            thresholds=TickerMixedConfig(),
+            recent_articles=[],
+        ),
+    )
+
+    repository = InMemoryEnrichmentRepository()
+    orchestrator = EnrichmentOrchestrator(repository=repository, include_xai=False)
+    request = ArticleEnrichmentRequest(
+        news_id="news-2",
+        title="Revenue rises on stronger demand",
+        link="https://example.com/news/2",
+        ticker=["AAPL"],
+    )
+
+    payload = orchestrator.run(request)
+
+    assert payload.analysis_status == AnalysisStatus.COMPLETED
+    assert payload.analysis_outcome == AnalysisOutcome.SUCCESS
+    assert payload.xai is None
+    assert any(
+        stage.stage.value == "xai" and stage.status.value == "skipped"
+        for stage in payload.stage_statuses
+    )

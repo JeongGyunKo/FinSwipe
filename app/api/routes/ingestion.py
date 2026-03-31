@@ -13,10 +13,12 @@ from app.schemas.ingestion import (
 )
 from app.schemas.operations import OperationalStatsResponse
 from app.services.ingestion_service import IngestionService
+from app.services.job_processing_service import JobProcessingService
 
 
 router = APIRouter(tags=["ingestion"])
 service = IngestionService()
+job_service = JobProcessingService()
 settings = get_settings()
 
 
@@ -89,4 +91,4 @@ async def process_next_job() -> WorkerProcessResponse:
                 "Run the dedicated worker service instead."
             ),
         )
-    return await asyncio.to_thread(service.process_next_job)
+    return await asyncio.to_thread(job_service.process_next_job)

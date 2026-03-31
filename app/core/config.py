@@ -21,6 +21,7 @@ class AppSettings:
     worker_poll_interval_seconds: float
     enable_job_process_api: bool
     use_worker_backed_direct_enrichment: bool
+    enable_inline_xai: bool
     direct_enrichment_wait_timeout_seconds: float
     direct_enrichment_poll_interval_seconds: float
     basic_auth_user: str | None
@@ -52,6 +53,10 @@ def get_settings() -> AppSettings:
         use_worker_backed_direct_enrichment=_env_flag(
             "GENAI_USE_WORKER_FOR_DIRECT_ENRICHMENT",
             default=running_on_render,
+        ),
+        enable_inline_xai=_env_flag(
+            "GENAI_ENABLE_INLINE_XAI",
+            default=False,
         ),
         direct_enrichment_wait_timeout_seconds=float(
             os.getenv("GENAI_DIRECT_ENRICHMENT_WAIT_TIMEOUT", "30")

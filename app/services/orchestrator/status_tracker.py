@@ -142,7 +142,10 @@ class PipelineStatusTracker:
             )
 
         if all(
-            self._stages[stage].status == PipelineStageStatus.COMPLETED
+            self._stages[stage].status in {
+                PipelineStageStatus.COMPLETED,
+                PipelineStageStatus.SKIPPED,
+            }
             for stage in _STAGE_ORDER
         ):
             return AnalysisStatus.COMPLETED, AnalysisOutcome.SUCCESS

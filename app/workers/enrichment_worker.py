@@ -4,7 +4,7 @@ import argparse
 import time
 
 from app.core.logging import configure_logging, get_logger, log_event
-from app.services.ingestion_service import IngestionService
+from app.services.job_processing_service import JobProcessingService
 
 
 logger = get_logger(__name__)
@@ -29,7 +29,7 @@ def build_parser() -> argparse.ArgumentParser:
 def main() -> None:
     args = build_parser().parse_args()
     configure_logging()
-    service = IngestionService()
+    service = JobProcessingService()
 
     if args.once:
         result = service.process_next_job()

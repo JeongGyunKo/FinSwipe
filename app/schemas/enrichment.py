@@ -85,6 +85,20 @@ class ErrorDetail(SchemaModel):
     )
 
 
+class ErrorCode(str, Enum):
+    ARTICLE_FETCH_FAILED = "article_fetch_failed"
+    ARTICLE_FETCH_RETRYABLE = "article_fetch_retryable"
+    TEXT_CLEAN_FAILED = "text_clean_failed"
+    ARTICLE_TEXT_INVALID = "article_text_invalid"
+    SUMMARY_GENERATION_FAILED = "summary_generation_failed"
+    SENTIMENT_ANALYSIS_FAILED = "sentiment_analysis_failed"
+    XAI_EXTRACTION_FAILED = "xai_extraction_failed"
+    MIXED_SIGNAL_DETECTION_FAILED = "mixed_signal_detection_failed"
+    PAYLOAD_BUILD_FAILED = "payload_build_failed"
+    RESULT_PERSIST_FAILED = "result_persist_failed"
+    UNKNOWN_FAILURE = "unknown_failure"
+
+
 class ArticleEnrichmentRequest(SchemaModel):
     news_id: str = Field(..., min_length=1, description="Unique news identifier.")
     title: str = Field(..., min_length=1, description="Original article title.")

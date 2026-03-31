@@ -6,6 +6,7 @@ const analysisStatus = document.getElementById("analysis-status");
 const analysisOutcome = document.getElementById("analysis-outcome");
 const summaryCount = document.getElementById("summary-count");
 const errorCount = document.getElementById("error-count");
+const jobId = document.getElementById("job-id");
 
 function normalizeTickers(value) {
     return value
@@ -46,10 +47,11 @@ function setLoadingState(isLoading) {
 }
 
 function renderResponse(data) {
-    analysisStatus.textContent = data.analysis_status || "unknown";
-    analysisOutcome.textContent = data.analysis_outcome || "unknown";
+    analysisStatus.textContent = data.analysis_status || data.status || "unknown";
+    analysisOutcome.textContent = data.analysis_outcome || data.outcome || "unknown";
     summaryCount.textContent = String((data.summary_3lines || []).length);
     errorCount.textContent = String((data.errors || []).length);
+    jobId.textContent = "n/a";
     responseOutput.textContent = JSON.stringify(data, null, 2);
 }
 
@@ -58,6 +60,7 @@ function renderError(message, details) {
     analysisOutcome.textContent = "fatal_failure";
     summaryCount.textContent = "0";
     errorCount.textContent = "1";
+    jobId.textContent = "n/a";
     responseOutput.textContent = JSON.stringify(
         {
             message,
@@ -68,13 +71,56 @@ function renderError(message, details) {
     );
 }
 
+function renderAccepted(data) {
+    analysisStatus.textContent = data.job?.status || "queued";
+    analysisOutcome.textContent = "submitted";
+    summaryCount.textContent = "0";
+    errorCount.textContent = "0";
+    jobId.textContent = data.job?.job_id || "n/a";
+    responseOutput.textContent = JSON.stringify(data, null, 2);
+}
+
+async function pollResult(newsIdValue) {
+    const deadline = Date.now() + 60000;
+
+    while (Date.now() < deadline) {
+        const response = await fetch(`/api/v1/news/${encodeURIComponent(newsIdValue)}/result`);
+        const data = await response.json();
+
+        if (!response.ok) {
+            throw new Error(JSON.stringify(data));
+        }
+
+        if (data.result) {
+            statusBanner.textContent = "Enrichment completed. Inspect the final payload below.";
+            renderResponse(data.result);
+            return;
+        }
+
+        if (data.latest_job?.status === "failed") {
+            statusBanner.textContent = "Enrichment job failed. Inspect the job payload below.";
+            analysisStatus.textContent = data.latest_job.status;
+            analysisOutcome.textContent = data.latest_job.last_analysis_status || "failed";
+            summaryCount.textContent = "0";
+            errorCount.textContent = data.latest_job.last_error ? "1" : "0";
+            jobId.textContent = data.latest_job.job_id || "n/a";
+            responseOutput.textContent = JSON.stringify(data, null, 2);
+            return;
+        }
+
+        await new Promise((resolve) => setTimeout(resolve, 1000));
+    }
+
+    statusBanner.textContent = "Job was submitted, but the final result did not arrive within 60 seconds.";
+}
+
 form.addEventListener("submit", async (event) => {
     event.preventDefault();
     const formData = new FormData(form);
     const payload = buildPayload(formData);
 
     setLoadingState(true);
-    statusBanner.textContent = "Calling /api/v1/articles/enrich ...";
+    statusBanner.textContent = "Submitting /api/v1/articles/enrich job ...";
 
     try {
         const response = await fetch("/api/v1/articles/enrich", {
@@ -93,8 +139,9 @@ form.addEventListener("submit", async (event) => {
             return;
         }
 
-        statusBanner.textContent = "Enrichment request completed. Inspect the structured payload below.";
-        renderResponse(data);
+        statusBanner.textContent = "Job accepted. Waiting for the worker to finish processing...";
+        renderAccepted(data);
+        await pollResult(payload.news_id);
     } catch (error) {
         statusBanner.textContent = "The request could not reach the backend.";
         renderError("Network or server error", String(error));

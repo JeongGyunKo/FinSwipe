@@ -3,6 +3,7 @@ from __future__ import annotations
 import logging
 from datetime import datetime, timezone
 
+from app.core import get_settings
 from app.core.logging import get_logger, log_event
 from app.repositories import EnrichmentRepository, SaveEnrichmentRequest
 from app.schemas.article_fetch import ArticleFetchResult, ArticleFetchStatus
@@ -28,6 +29,7 @@ from app.services.xai import explain_sentiment
 
 
 logger = get_logger(__name__)
+settings = get_settings()
 
 
 class EnrichmentOrchestrator:
@@ -37,8 +39,10 @@ class EnrichmentOrchestrator:
         self,
         *,
         repository: EnrichmentRepository,
+        include_xai: bool | None = None,
     ) -> None:
         self._repository = repository
+        self._include_xai = settings.enable_inline_xai if include_xai is None else include_xai
 
     def run(self, request: ArticleEnrichmentRequest) -> EnrichmentStoragePayload:
         return self._run_pipeline(request=request, provided_text=None)
@@ -110,11 +114,17 @@ class EnrichmentOrchestrator:
                     tracker=tracker,
                 )
                 if sentiment_result is not None:
-                    xai_result = self._run_xai_stage(
-                        request=request,
-                        cleaned_text=cleaned_text,
-                        tracker=tracker,
-                    )
+                    if self._include_xai:
+                        xai_result = self._run_xai_stage(
+                            request=request,
+                            cleaned_text=cleaned_text,
+                            tracker=tracker,
+                        )
+                    else:
+                        tracker.skip(
+                            PipelineStageName.XAI,
+                            "Skipped in the base pipeline. Run the dedicated XAI flow if explanations are required.",
+                        )
                     article_mixed, ticker_mixed = self._run_mixed_detection_stage(
                         request=request,
                         sentiment_result=sentiment_result,

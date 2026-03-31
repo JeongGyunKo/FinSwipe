@@ -23,6 +23,14 @@ class EnrichmentJobStatus(str, Enum):
     FAILED = "failed"
 
 
+class ProcessingState(str, Enum):
+    QUEUED = "queued"
+    RETRY_PENDING = "retry_pending"
+    PROCESSING = "processing"
+    COMPLETED = "completed"
+    FAILED = "failed"
+
+
 class RawNewsIngestionRequest(FlexibleTextEnrichmentRequest):
     """Inbound raw-news payload sent by the upstream backend/news ingestion system."""
 
@@ -49,12 +57,28 @@ class EnrichmentJobRecord(SchemaModel):
 class IngestionAcceptedResponse(SchemaModel):
     news_id: str = Field(..., min_length=1)
     queued: bool = Field(..., description="Whether a new job was enqueued.")
+    processing_state: ProcessingState = Field(
+        ...,
+        description="Top-level state for the submitted enrichment request.",
+    )
+    error_code: str | None = Field(
+        default=None,
+        description="Stable machine-readable error code when the request is already in a failed state.",
+    )
     message: str = Field(..., min_length=1)
     job: EnrichmentJobRecord = Field(..., description="Active or newly created job record.")
 
 
 class NewsProcessingStatusResponse(SchemaModel):
     news_id: str = Field(..., min_length=1)
+    processing_state: ProcessingState = Field(
+        ...,
+        description="Top-level state for this news enrichment workflow.",
+    )
+    error_code: str | None = Field(
+        default=None,
+        description="Stable machine-readable error code for the latest failed state, if any.",
+    )
     raw_news: ArticleEnrichmentRequest | None = Field(default=None)
     latest_job: EnrichmentJobRecord | None = Field(default=None)
     enrichment: EnrichmentStoragePayload | None = Field(default=None)
@@ -62,6 +86,14 @@ class NewsProcessingStatusResponse(SchemaModel):
 
 class NewsResultResponse(SchemaModel):
     news_id: str = Field(..., min_length=1)
+    processing_state: ProcessingState = Field(
+        ...,
+        description="Top-level state for this news enrichment workflow.",
+    )
+    error_code: str | None = Field(
+        default=None,
+        description="Stable machine-readable error code for the latest failed state, if any.",
+    )
     raw_news: ArticleEnrichmentRequest | None = Field(default=None)
     latest_job: EnrichmentJobRecord | None = Field(default=None)
     result: ArticleEnrichmentResponse | None = Field(default=None)
@@ -75,6 +107,14 @@ class WorkerProcessResponse(SchemaModel):
     )
     message: str = Field(..., min_length=1)
     news_id: str | None = Field(default=None)
+    processing_state: ProcessingState | None = Field(
+        default=None,
+        description="Top-level state after the worker handled the job.",
+    )
+    error_code: str | None = Field(
+        default=None,
+        description="Stable machine-readable error code when the processed job ended in failure.",
+    )
     job: EnrichmentJobRecord | None = Field(default=None)
     analysis_status: AnalysisStatus | None = Field(default=None)
     analysis_outcome: AnalysisOutcome | None = Field(default=None)

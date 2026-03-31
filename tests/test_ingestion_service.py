@@ -7,7 +7,7 @@ from app.schemas.article_fetch import ArticleFetchResult, ArticleFetchStatus
 from app.schemas.enrichment import ArticleEnrichmentRequest
 from app.schemas.storage import AnalysisOutcome, AnalysisStatus, EnrichmentStoragePayload
 from app.services.article_fetcher import FetchRetryPolicy
-from app.services.ingestion_service import IngestionService
+from app.services.job_processing_service import JobProcessingService
 
 
 def _build_fatal_payload(*, retryable: bool) -> EnrichmentStoragePayload:
@@ -36,7 +36,7 @@ def _build_fatal_payload(*, retryable: bool) -> EnrichmentStoragePayload:
 
 def test_process_next_job_requeues_retryable_fetch_failure(monkeypatch) -> None:
     repository = InMemoryEnrichmentRepository()
-    service = IngestionService(
+    service = JobProcessingService(
         repository=repository,
         fetch_retry_policy=FetchRetryPolicy(base_backoff_seconds=2.0, max_backoff_seconds=2.0),
     )
@@ -49,7 +49,7 @@ def test_process_next_job_requeues_retryable_fetch_failure(monkeypatch) -> None:
     repository.create_enrichment_job("news-1", max_attempts=3)
 
     monkeypatch.setattr(
-        service._orchestrator,
+        service.orchestrator,
         "run",
         lambda raw_news: _build_fatal_payload(retryable=True),
     )
@@ -59,13 +59,15 @@ def test_process_next_job_requeues_retryable_fetch_failure(monkeypatch) -> None:
     assert result.retry_scheduled is True
     assert result.job is not None
     assert result.job.status.value == "retry_pending"
+    assert result.processing_state.value == "retry_pending"
+    assert result.error_code == "article_fetch_retryable"
     assert result.job.next_retry_at is not None
     assert result.job.next_retry_at > datetime.now(timezone.utc)
 
 
 def test_process_next_job_fails_non_retryable_fetch_failure(monkeypatch) -> None:
     repository = InMemoryEnrichmentRepository()
-    service = IngestionService(repository=repository)
+    service = JobProcessingService(repository=repository)
     request = ArticleEnrichmentRequest(
         news_id="news-1",
         title="Title",
@@ -75,7 +77,7 @@ def test_process_next_job_fails_non_retryable_fetch_failure(monkeypatch) -> None
     repository.create_enrichment_job("news-1", max_attempts=3)
 
     monkeypatch.setattr(
-        service._orchestrator,
+        service.orchestrator,
         "run",
         lambda raw_news: _build_fatal_payload(retryable=False),
     )
@@ -85,6 +87,8 @@ def test_process_next_job_fails_non_retryable_fetch_failure(monkeypatch) -> None
     assert result.retry_scheduled is False
     assert result.job is not None
     assert result.job.status.value == "failed"
+    assert result.processing_state.value == "failed"
+    assert result.error_code == "article_fetch_failed"
 
 
 def test_claim_next_job_skips_retry_pending_until_due() -> None:
