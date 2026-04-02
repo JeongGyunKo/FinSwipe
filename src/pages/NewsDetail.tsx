@@ -35,13 +35,14 @@ export const NewsDetail = () => {
     <Header type="detail" />
     <div className="relative px-4 py-6 pb-32 min-h-screen">
       {/* 태그 영역 */}
-      <div className="flex flex-wrap gap-2">
-        {news.categories?.map((cate) => (
-          <span key={cate} className="px-3 h-7 leading-7 rounded-full bg-blue-600/10 text-sm font-medium text-blue-600">{news.categories}</span>
-        ))}
+      <div className="flex flex-wrap items-center gap-2">
         {news.tickers?.map((t) => (
           <span key={t} className="px-3 h-7 leading-7 rounded-full bg-gray-100 text-sm font-semibold text-gray-900">{news.tickers}</span>
         ))}
+        {news.categories?.map((cate, index) => (
+          <span key={index} className="text-xs text-gray-400">{cate}</span>
+        ))}
+        
       </div>
 
       {/* 제목 영역 */}
@@ -66,13 +67,13 @@ export const NewsDetail = () => {
         <div className="flex gap-2 px-4 py-6 bg-linear-to-t from-white via-white/95 to-transparent">
           <button 
             onClick={() => window.open(news.source_url, '_blank')}
-            className="flex-1 h-14 bg-blue-600 text-white rounded-2xl font-semibold text-basic cursor-pointer"
+            className="flex-1 h-14 bg-blue-600 text-white rounded-xl font-semibold text-basic cursor-pointer"
           >
             자세히보기
           </button>
           <button
             onClick={() =>navigate(-1)}
-            className="flex-1 h-14 bg-gray-100 text-gray-900 rounded-2xl font-semibold text-basic cursor-pointer"
+            className="flex-1 h-14 bg-gray-100 text-gray-900 rounded-xl font-semibold text-basic cursor-pointer"
           >
             다음 뉴스
           </button>
