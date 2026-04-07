@@ -25,7 +25,7 @@ export const Navigation = ({ showDisclaimer = false }: NavigationProps) => {
   const location = useLocation();
 
   return (
-    <div className="fixed bottom-0 left-1/2 -translate-x-1/2 w-full min-w-80 max-w-107.5 bg-white">
+    <div className="fixed bottom-0 z-50 left-1/2 -translate-x-1/2 w-full min-w-80 max-w-107.5 bg-white">
       {showDisclaimer && (
         <div className="px-4 py-2 text-xs text-gray-500 text-center border-t border-gray-100">
           본 서비스는 투자 참고용 정보를 제공하며, 수익성을 보장하지 않습니다. <br/>
