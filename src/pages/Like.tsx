@@ -67,7 +67,7 @@ export const Like = () => {
       />
       <div className="flex justify-between items-center">
         <div className="text-sm text-gray-600">선택된 종목: <span className="font-semibold text-blue-600">{selectedTickers.length}개</span></div>
-        <button className="text-sm font-medium text-gray-600">모두 해제</button>
+        <button onClick={clearAll} className="text-sm font-medium text-gray-600">모두 해제</button>
       </div>
     </div>
 
@@ -86,8 +86,7 @@ export const Like = () => {
         ))
       ): (
         <div className="py-20 text-center text-gray-400">검색 결과가 없습니다.</div>
-      )}
-     
+      )}     
     </div>
 
     {/* 하단바 */}
