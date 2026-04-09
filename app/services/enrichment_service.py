@@ -17,6 +17,8 @@ from app.schemas.enrichment import (
     StageName,
     StageStatus,
     SummaryLine,
+    XAIDisplayEvidenceItem,
+    XAIDisplayPayload,
     XAIHighlightItem,
     XAIPayload,
 )
@@ -107,6 +109,7 @@ def build_api_enrichment_response(
         for index, text in enumerate(payload.summary_3lines, start=1)
     ]
     xai_payload = _build_xai_payload(payload.xai, api_sentiment)
+    xai_display_payload = _build_xai_display_payload(payload.xai, api_sentiment)
     localized = build_localized_content(
         title=payload.title,
         summary_3lines=summary_lines,
@@ -122,6 +125,7 @@ def build_api_enrichment_response(
         summary_3lines=summary_lines,
         sentiment=api_sentiment,
         xai=xai_payload,
+        xai_display=xai_display_payload,
         localized=localized,
         mixed_flags=_build_mixed_flags(mixed_result),
         status=_map_overall_status(payload.analysis_status, payload.analysis_outcome),
@@ -179,6 +183,34 @@ def _build_xai_payload(
                 ),
                 start_char=highlight.start_char,
                 end_char=highlight.end_char,
+            )
+            for highlight in payload.highlights
+        ],
+    )
+
+
+def _build_xai_display_payload(
+    payload: XAIResult | None,
+    sentiment: SentimentResult | None,
+) -> XAIDisplayPayload | None:
+    if payload is None or not payload.highlights:
+        return None
+
+    target_label = sentiment.label if sentiment is not None else None
+    return XAIDisplayPayload(
+        evidence=[
+            XAIDisplayEvidenceItem(
+                excerpt=highlight.text_snippet,
+                keywords=[
+                    keyword.text_snippet
+                    for keyword in highlight.keyword_spans
+                    if keyword.text_snippet.strip()
+                ][:3],
+                sentiment_signal=_map_highlight_signal(
+                    highlight.contribution_direction,
+                    target_label,
+                ),
+                relevance_score=min(1.0, max(0.0, highlight.importance_score)),
             )
             for highlight in payload.highlights
         ],

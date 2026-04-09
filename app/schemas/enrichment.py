@@ -256,6 +256,35 @@ class XAIPayload(SchemaModel):
     )
 
 
+class XAIDisplayEvidenceItem(SchemaModel):
+    excerpt: str = Field(
+        ...,
+        min_length=1,
+        description="Frontend-ready evidence sentence.",
+    )
+    keywords: list[str] = Field(
+        default_factory=list,
+        description="Important keyword or phrase snippets inside the evidence sentence.",
+    )
+    sentiment_signal: SentimentLabel | None = Field(
+        default=None,
+        description="Optional sentiment direction associated with the evidence sentence.",
+    )
+    relevance_score: float | None = Field(
+        default=None,
+        ge=0.0,
+        le=1.0,
+        description="Relative importance score for the evidence sentence.",
+    )
+
+
+class XAIDisplayPayload(SchemaModel):
+    evidence: list[XAIDisplayEvidenceItem] = Field(
+        default_factory=list,
+        description="Frontend-friendly XAI evidence list.",
+    )
+
+
 class LocalizedArticleContent(SchemaModel):
     language: str = Field(..., min_length=2, description="Localized display language.")
     title: str = Field(..., min_length=1, description="Localized article title.")
@@ -332,6 +361,10 @@ class ArticleEnrichmentResponse(SchemaModel):
     xai: XAIPayload | None = Field(
         default=None,
         description="Explainability payload when analysis succeeded.",
+    )
+    xai_display: XAIDisplayPayload | None = Field(
+        default=None,
+        description="Frontend-friendly evidence payload derived from the explainability result.",
     )
     localized: LocalizedArticleContent | None = Field(
         default=None,

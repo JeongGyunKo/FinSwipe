@@ -202,6 +202,11 @@ def test_news_intake_worker_and_status_flow(monkeypatch) -> None:
     assert result_payload["result"]["status"] == "completed"
     assert result_payload["result"]["outcome"] == "success"
     assert result_payload["result"]["sentiment"]["label"] == "bullish"
+    assert result_payload["result"]["xai_display"]["evidence"][0]["excerpt"] == (
+        "Revenue growth stayed ahead of expectations."
+    )
+    assert result_payload["result"]["xai_display"]["evidence"][0]["keywords"] == []
+    assert result_payload["result"]["xai_display"]["evidence"][0]["sentiment_signal"] == "bullish"
     assert result_payload["result"]["localized"]["title"] == "Company beats earnings estimates"
     assert result_payload["result"]["localized"]["sentiment_label"] == "강세"
     assert result_payload["result"]["xai"]["highlights"][0]["excerpt"] == (
