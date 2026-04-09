@@ -11,9 +11,7 @@ import PwIcon from "../assets/ic_password.svg";
 import Google from "../assets/ic_google.svg";
 
 export const Login = () => {
-
   
-
   return (
     <>
       <div className="flex flex-col gap-4 p-6 py-16 bg-[linear-gradient(180deg,rgba(0,100,255,1)_0%,rgba(0,82,204,1)_100%)]">
@@ -43,8 +41,8 @@ export const Login = () => {
             icon={PwIcon}
           />
           <div className="flex justify-between">
-            <button className="text-base font-medium text-gray-600">이메일 찾기</button>
-            <button className="text-base font-medium text-gray-600">비밀번호 찾기</button>
+            <Link to="/FindEmail" className="text-base font-medium text-gray-600">이메일 찾기</Link>
+            <Link to="/FindPassword" className="text-base font-medium text-gray-600">비밀번호 찾기</Link>
           </div>
           <Button className="mt-10" variant="primary" size="lg">로그인</Button>
           <div className="my-6 flex items-center gap-4">
@@ -65,7 +63,6 @@ export const Login = () => {
           <Link to="/signUp" className="text-base text-blue-600 font-semibold">회원가입</Link>
         </div>
       </div>
-      {/* <button onClick={() => navigate('/signUp')}>회원가입</button> */}
     </>
   );
 };
