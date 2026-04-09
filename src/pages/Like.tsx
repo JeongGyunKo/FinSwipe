@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { useEffect, useState, useMemo } from "react";
 import { getUniqueTickersFromNews } from "../api/tickerService";
 import type { TickerInfo } from "../types/tickers";
 import { StockCard } from "../components/setup/StockCard";
@@ -13,9 +13,10 @@ export const Like = () => {
   const [stocks, setStocks] = useState<TickerInfo[]>([]);
   const [loading, setLoading] = useState(true);
   const [selectedTickers, setSelectedTickers] = useState<string[]>([]);
+  const [searchTerm, setSearchTerm] = useState("");
 
-  useEffect(() => {
-    // 페이지 진입 시 티커 리스트를 불러옵니다.
+  //페이지 진입 시 티커 리스트 렌더링
+  useEffect(() => {    
     const loadTickers = async () => {
       const data = await getUniqueTickersFromNews();
       setStocks(data);
@@ -25,6 +26,16 @@ export const Like = () => {
     loadTickers();
   }, []);
 
+  // 검색 필터링
+  const filteredStocks = useMemo(() => {
+    const term = searchTerm.toLowerCase();
+    return stocks.filter(
+      (stock) =>
+        stock.symbol.toLowerCase().includes(term) ||
+        stock.name.toLowerCase().includes(term)
+    );
+  }, [searchTerm, stocks]);
+
   // 종목 선택 Toggle
   const toggleStock = (symbol: string) => {
     setSelectedTickers((prev) =>
@@ -33,6 +44,9 @@ export const Like = () => {
       : [...prev, symbol]
     );
   };
+
+  // 모두 해제
+  const clearAll = () => setSelectedTickers([]);
 
   if (loading) return <div className="p-10 text-center">종목 데이터를 불러오는 중...</div>;
   
@@ -48,17 +62,20 @@ export const Like = () => {
       <Input 
         placeholder="종목명 또는 티커 검색..."
         icon={search}
+        value={searchTerm}
+        onChange={(e) => setSearchTerm(e.target.value)}
       />
       <div className="flex justify-between items-center">
-        <div className="text-sm text-gray-600">선택된 종목: <span className="font-semibold text-blue-600">1개</span></div>
+        <div className="text-sm text-gray-600">선택된 종목: <span className="font-semibold text-blue-600">{selectedTickers.length}개</span></div>
         <button className="text-sm font-medium text-gray-600">모두 해제</button>
       </div>
     </div>
 
     {/* 종목 리스트 */}
-    <div className="space-y-2 bg-gray-50 p-4">
-      {stocks.map((stock) => (
-        <StockCard 
+    <div className="space-y-2 bg-gray-50 p-4 pb-40">
+      {filteredStocks.length > 0 ? (
+        filteredStocks.map((stock) => (
+          <StockCard 
           key={stock.symbol}
           ticker={stock.symbol}
           name={stock.name}
@@ -66,12 +83,18 @@ export const Like = () => {
           isSelected={selectedTickers.includes(stock.symbol)}
           onToggle={() => toggleStock(stock.symbol)}
         />  
-      ))}
+        ))
+      ): (
+        <div className="py-20 text-center text-gray-400">검색 결과가 없습니다.</div>
+      )}
+     
     </div>
 
     {/* 하단바 */}
     <div className="fixed bottom-16 z-50 left-1/2 -translate-x-1/2 w-full min-w-80 max-w-107.5 p-4 bg-white border-t border-gray-100">
-      <Button variant="primary" disabled>0개 종목 저장하기</Button>
+      <Button variant="primary" disabled={selectedTickers.length === 0}>
+        {selectedTickers.length}개 종목 저장하기
+      </Button>
     </div>
     <Navigation showDisclaimer={false}/>
     </>
