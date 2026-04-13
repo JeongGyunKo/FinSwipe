@@ -103,3 +103,52 @@ def test_ticker_level_mixed_detection_triggers_on_variance_and_conflicting_distr
     assert result.article_count == 4
     assert "high_score_variance" in [code.value for code in result.triggered_reason_codes]
     assert "conflicting_distribution" in [code.value for code in result.triggered_reason_codes]
+
+
+def test_ticker_level_mixed_detection_stays_clear_when_only_one_rule_triggers() -> None:
+    now = datetime.now(timezone.utc)
+    recent_articles = [
+        TickerSentimentObservation(
+            ticker="AAPL",
+            news_id="1",
+            score=24.0,
+            label=FinBERTSentimentLabel.POSITIVE,
+            confidence=0.9,
+            analyzed_at=now - timedelta(hours=2),
+        ),
+        TickerSentimentObservation(
+            ticker="AAPL",
+            news_id="2",
+            score=19.0,
+            label=FinBERTSentimentLabel.POSITIVE,
+            confidence=0.88,
+            analyzed_at=now - timedelta(hours=4),
+        ),
+        TickerSentimentObservation(
+            ticker="AAPL",
+            news_id="3",
+            score=-8.0,
+            label=FinBERTSentimentLabel.NEGATIVE,
+            confidence=0.81,
+            analyzed_at=now - timedelta(hours=6),
+        ),
+        TickerSentimentObservation(
+            ticker="AAPL",
+            news_id="4",
+            score=21.0,
+            label=FinBERTSentimentLabel.POSITIVE,
+            confidence=0.84,
+            analyzed_at=now - timedelta(hours=8),
+        ),
+    ]
+
+    result = detect_ticker_level_mixed(
+        ticker="AAPL",
+        recent_articles=recent_articles,
+        reference_time=now,
+    )
+
+    assert result.is_mixed is False
+    assert result.status.value == "clear"
+    assert "conflicting_distribution" in [code.value for code in result.triggered_reason_codes]
+    assert "high_score_variance" not in [code.value for code in result.triggered_reason_codes]

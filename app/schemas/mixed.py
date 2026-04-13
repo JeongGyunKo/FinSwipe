@@ -144,7 +144,7 @@ class TickerMixedConfig(SchemaModel):
         description="Minimum share required on both positive and negative sides to treat distribution as conflicting.",
     )
     min_trigger_count: int = Field(
-        default=1,
+        default=2,
         ge=1,
         description="Minimum number of triggered rules required to mark the ticker as mixed.",
     )
