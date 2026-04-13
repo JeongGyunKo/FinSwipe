@@ -6,7 +6,7 @@ from app.services.translation.deepl_service import build_localized_content
 
 
 def test_build_localized_content_falls_back_without_api_key(monkeypatch) -> None:
-    monkeypatch.delenv("DEEPL_API_KEY", raising=False)
+    monkeypatch.delenv("GROQ_API_KEY", raising=False)
 
     localized = build_localized_content(
         title="Apple raises guidance",
@@ -41,9 +41,10 @@ def test_build_localized_content_falls_back_without_api_key(monkeypatch) -> None
     assert localized.ticker_box_labels["revenue"] == "매출"
 
 
-def test_build_localized_content_uses_deepl_when_api_key_present(monkeypatch) -> None:
-    monkeypatch.setenv("DEEPL_API_KEY", "test-key")
-    monkeypatch.setenv("DEEPL_API_BASE_URL", "https://api-free.deepl.com")
+def test_build_localized_content_uses_groq_when_api_key_present(monkeypatch) -> None:
+    monkeypatch.setenv("GROQ_API_KEY", "test-key")
+    monkeypatch.setenv("GROQ_API_BASE_URL", "https://api.groq.com/openai")
+    monkeypatch.setenv("GROQ_TRANSLATION_MODEL", "llama-3.1-8b-instant")
 
     translated_values = iter(
         [
@@ -61,12 +62,12 @@ def test_build_localized_content_uses_deepl_when_api_key_present(monkeypatch) ->
             return None
 
         def json(self) -> dict[str, object]:
-            return {"translations": [{"text": next(translated_values)}]}
+            return {"choices": [{"message": {"content": next(translated_values)}}]}
 
     def _fake_post(*args, **kwargs):
         return _Response()
 
-    monkeypatch.setattr("app.services.translation.deepl_service.requests.post", _fake_post)
+    monkeypatch.setattr("app.services.groq.client.requests.post", _fake_post)
 
     localized = build_localized_content(
         title="Apple raises guidance",

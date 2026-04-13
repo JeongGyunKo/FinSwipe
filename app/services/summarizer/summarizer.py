@@ -1,10 +1,14 @@
 from __future__ import annotations
 
+import logging
 import re
 from dataclasses import dataclass
 
+from app.core import get_settings
+from app.services.groq import groq_chat_completion, groq_is_enabled
 from app.services.text_cleaner import clean_article_text
 
+logger = logging.getLogger(__name__)
 
 SUMMARY_LINE_COUNT = 3
 MAX_LINE_LENGTH = 120
@@ -97,6 +101,10 @@ def summarize_to_three_lines(title: str, article_text: str) -> list[str]:
     if not cleaned_text:
         return ["", "", ""]
 
+    groq_summary = _summarize_with_groq(title=title, article_text=cleaned_text)
+    if groq_summary is not None:
+        return groq_summary
+
     sentences = _extract_sentences(cleaned_text)
     if not sentences:
         fallback = _truncate_for_card(cleaned_text)
@@ -114,6 +122,57 @@ def summarize_to_three_lines(title: str, article_text: str) -> list[str]:
         lines.append("")
 
     return lines[:SUMMARY_LINE_COUNT]
+
+
+def _summarize_with_groq(*, title: str, article_text: str) -> list[str] | None:
+    if not groq_is_enabled():
+        return None
+
+    settings = get_settings()
+    try:
+        content = groq_chat_completion(
+            model=settings.groq_summary_model,
+            system_prompt=(
+                "You are a financial news summarizer. "
+                "Write exactly three Korean summary lines. "
+                "Each line must be a single sentence. "
+                "Preserve numbers, percentages, and ticker symbols exactly. "
+                "Do not exaggerate. "
+                "Ignore table headers, reconciliation labels, boilerplate, and footers. "
+                "Return only the three lines with no title, bullets, or commentary."
+            ),
+            user_prompt=(
+                f"Title: {title}\n\n"
+                "Article:\n"
+                f"{article_text}\n\n"
+                "Return exactly three Korean lines."
+            ),
+        )
+    except Exception:
+        logger.exception("Groq summary generation failed; falling back to heuristic summarizer.")
+        return None
+
+    lines = _parse_summary_lines(content)
+    if len(lines) != SUMMARY_LINE_COUNT or not all(line.strip() for line in lines):
+        logger.warning(
+            "Groq summary generation returned unusable output; falling back to heuristic summarizer."
+        )
+        return None
+    return lines
+
+
+def _parse_summary_lines(content: str) -> list[str]:
+    lines: list[str] = []
+    for raw_line in content.splitlines():
+        line = raw_line.strip()
+        if not line:
+            continue
+        line = re.sub(r"^(?:[-*•]\s*|\d+[.)]\s*)", "", line).strip()
+        if line:
+            lines.append(_truncate_for_card(line))
+        if len(lines) == SUMMARY_LINE_COUNT:
+            break
+    return lines
 
 
 def _extract_sentences(text: str) -> list[str]:

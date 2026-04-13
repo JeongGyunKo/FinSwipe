@@ -4,8 +4,6 @@ import logging
 import re
 from dataclasses import dataclass
 
-import requests
-
 from app.core import get_settings
 from app.schemas.enrichment import (
     LocalizedArticleContent,
@@ -14,6 +12,7 @@ from app.schemas.enrichment import (
     XAIHighlightItem,
     XAIPayload,
 )
+from app.services.groq import groq_chat_completion, groq_is_enabled
 
 logger = logging.getLogger(__name__)
 
@@ -113,38 +112,31 @@ def _translate_with_fallback(text: str, *, tickers: list[str] | None) -> str:
     if not normalized:
         return normalized
 
-    settings = get_settings()
-    if not settings.deepl_api_key:
+    if not groq_is_enabled():
         return normalized
 
     try:
-        return _translate_text(normalized, tickers=tickers, settings=settings)
+        return _translate_text(normalized, tickers=tickers)
     except Exception:
-        logger.exception("DeepL translation failed; falling back to source text.")
+        logger.exception("Groq translation failed; falling back to source text.")
         return normalized
 
 
-def _translate_text(text: str, *, tickers: list[str] | None, settings) -> str:
+def _translate_text(text: str, *, tickers: list[str] | None) -> str:
+    settings = get_settings()
     masked = _mask_text(text, tickers=tickers)
-    response = requests.post(
-        f"{settings.deepl_api_base_url}/v2/translate",
-        headers={
-            "Authorization": f"DeepL-Auth-Key {settings.deepl_api_key}",
-            "Content-Type": "application/json",
-        },
-        json={
-            "text": [masked.text],
-            "target_lang": settings.deepl_target_lang,
-            "preserve_formatting": True,
-        },
-        timeout=settings.deepl_timeout_seconds,
+    translated = groq_chat_completion(
+        model=settings.groq_translation_model,
+        system_prompt=(
+            "You are a financial translation engine. "
+            "Translate the user text into natural Korean. "
+            "Preserve placeholders like ZXQKEEP0ZXQ exactly as written. "
+            "Do not add commentary. "
+            "Keep numbers, percentages, ticker symbols, and finance abbreviations intact."
+        ),
+        user_prompt=f"Translate this to Korean:\n\n{masked.text}",
+        temperature=0.0,
     )
-    response.raise_for_status()
-    payload = response.json()
-    translations = payload.get("translations") or []
-    if not translations or not translations[0].get("text"):
-        return text
-    translated = translations[0]["text"].strip()
     return _unmask_text(translated, masked.replacements)
 
 

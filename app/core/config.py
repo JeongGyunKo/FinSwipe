@@ -31,6 +31,11 @@ class AppSettings:
     deepl_api_base_url: str
     deepl_target_lang: str
     deepl_timeout_seconds: float
+    groq_api_key: str | None
+    groq_api_base_url: str
+    groq_summary_model: str
+    groq_translation_model: str
+    groq_timeout_seconds: float
 
     @property
     def basic_auth_enabled(self) -> bool:
@@ -78,4 +83,15 @@ def get_settings() -> AppSettings:
         ).rstrip("/"),
         deepl_target_lang=(os.getenv("DEEPL_TARGET_LANG") or "KO").strip().upper(),
         deepl_timeout_seconds=float(os.getenv("DEEPL_TIMEOUT_SECONDS", "8")),
+        groq_api_key=os.getenv("GROQ_API_KEY"),
+        groq_api_base_url=(
+            os.getenv("GROQ_API_BASE_URL") or "https://api.groq.com/openai"
+        ).rstrip("/"),
+        groq_summary_model=(
+            os.getenv("GROQ_SUMMARY_MODEL") or "llama-3.1-8b-instant"
+        ).strip(),
+        groq_translation_model=(
+            os.getenv("GROQ_TRANSLATION_MODEL") or "llama-3.1-8b-instant"
+        ).strip(),
+        groq_timeout_seconds=float(os.getenv("GROQ_TIMEOUT_SECONDS", "20")),
     )
