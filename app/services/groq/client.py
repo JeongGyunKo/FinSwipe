@@ -25,7 +25,7 @@ def groq_chat_completion(
         raise RuntimeError("Groq API key is not configured.")
 
     response = requests.post(
-        f"{settings.groq_api_base_url}/chat/completions",
+        _build_chat_completions_url(settings.groq_api_base_url),
         headers={
             "Authorization": f"Bearer {settings.groq_api_key}",
             "Content-Type": "application/json",
@@ -50,3 +50,10 @@ def groq_chat_completion(
     if not isinstance(content, str) or not content.strip():
         raise RuntimeError("Groq response contained no message content.")
     return content.strip()
+
+
+def _build_chat_completions_url(base_url: str) -> str:
+    normalized = base_url.rstrip("/")
+    if normalized.endswith("/v1"):
+        return f"{normalized}/chat/completions"
+    return f"{normalized}/v1/chat/completions"
