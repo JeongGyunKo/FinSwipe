@@ -229,6 +229,7 @@ def _cached_summary_completion(base_url: str, model: str, title: str, article_te
         ),
         user_prompt=f"Title: {title}\nArticle:\n{article_text}",
         temperature=0.0,
+        request_label="summary_generation",
     )
 
 

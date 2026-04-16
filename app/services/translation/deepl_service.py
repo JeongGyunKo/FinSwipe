@@ -60,11 +60,15 @@ def build_localized_content(
     sentiment_label: SentimentLabel | None,
     tickers: list[str] | None = None,
 ) -> LocalizedArticleContent:
-    translated_title = _translate_with_fallback(title, tickers=tickers)
+    translated_title = _translate_with_fallback(title, tickers=tickers, request_label="translate_title")
     translated_summary = [
         SummaryLine(
             line_number=line.line_number,
-            text=_translate_with_fallback(line.text, tickers=tickers),
+            text=_translate_with_fallback(
+                line.text,
+                tickers=tickers,
+                request_label=f"translate_summary_line_{line.line_number}",
+            ),
         )
         for line in summary_3lines
     ]
@@ -89,13 +93,25 @@ def _translate_xai_payload(
         return None
 
     return XAIPayload(
-        explanation=_translate_with_fallback(payload.explanation, tickers=tickers),
+        explanation=_translate_with_fallback(
+            payload.explanation,
+            tickers=tickers,
+            request_label="translate_xai_explanation",
+        ),
         highlights=[
             XAIHighlightItem(
-                excerpt=_translate_with_fallback(item.excerpt, tickers=tickers),
+                excerpt=_translate_with_fallback(
+                    item.excerpt,
+                    tickers=tickers,
+                    request_label=f"translate_xai_highlight_{index + 1}",
+                ),
                 relevance_score=item.relevance_score,
                 explanation=(
-                    _translate_with_fallback(item.explanation, tickers=tickers)
+                    _translate_with_fallback(
+                        item.explanation,
+                        tickers=tickers,
+                        request_label=f"translate_xai_detail_{index + 1}",
+                    )
                     if item.explanation
                     else None
                 ),
@@ -103,12 +119,17 @@ def _translate_xai_payload(
                 start_char=item.start_char,
                 end_char=item.end_char,
             )
-            for item in payload.highlights
+            for index, item in enumerate(payload.highlights)
         ],
     )
 
 
-def _translate_with_fallback(text: str, *, tickers: list[str] | None) -> str:
+def _translate_with_fallback(
+    text: str,
+    *,
+    tickers: list[str] | None,
+    request_label: str,
+) -> str:
     normalized = text.strip()
     if not normalized:
         return normalized
@@ -117,13 +138,13 @@ def _translate_with_fallback(text: str, *, tickers: list[str] | None) -> str:
         return normalized
 
     try:
-        return _translate_text(normalized, tickers=tickers)
+        return _translate_text(normalized, tickers=tickers, request_label=request_label)
     except Exception:
         logger.exception("Groq translation failed; falling back to source text.")
         return normalized
 
 
-def _translate_text(text: str, *, tickers: list[str] | None) -> str:
+def _translate_text(text: str, *, tickers: list[str] | None, request_label: str) -> str:
     settings = get_settings()
     prepared = _prepare_translation_input(text, char_limit=settings.groq_translation_char_limit)
     masked = _mask_text(prepared, tickers=tickers)
@@ -131,6 +152,7 @@ def _translate_text(text: str, *, tickers: list[str] | None) -> str:
         settings.groq_api_base_url,
         settings.groq_translation_model,
         masked.text,
+        request_label,
     )
     return _polish_korean_financial_text(_unmask_text(translated, masked.replacements))
 
@@ -164,7 +186,7 @@ def _unmask_text(text: str, replacements: dict[str, str]) -> str:
 
 
 @lru_cache(maxsize=512)
-def _cached_translation_completion(base_url: str, model: str, masked_text: str) -> str:
+def _cached_translation_completion(base_url: str, model: str, masked_text: str, request_label: str) -> str:
     del base_url
     return groq_chat_completion(
         model=model,
@@ -179,6 +201,7 @@ def _cached_translation_completion(base_url: str, model: str, masked_text: str) 
         ),
         user_prompt=masked_text,
         temperature=0.0,
+        request_label=request_label,
     )
 
 
