@@ -129,6 +129,13 @@ def _is_safe_boilerplate_line(line: str) -> bool:
 
 def _looks_like_table_header(line: str) -> bool:
     lowered = line.lower()
+    compact_line = line.strip()
+    # Guard against long single-line article bodies that merely mention
+    # financial terms such as GAAP, non-GAAP, or "in millions".
+    if len(compact_line) > 160:
+        return len(compact_line) > 45 and compact_line.upper() == compact_line and sum(
+            ch.isalpha() for ch in compact_line
+        ) >= 25
     if "gaap" in lowered and "non-gaap" in lowered:
         return True
     if "condensed consolidated" in lowered:
