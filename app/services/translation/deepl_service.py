@@ -3,6 +3,7 @@ from __future__ import annotations
 import logging
 import re
 from dataclasses import dataclass
+from functools import lru_cache
 
 from app.core import get_settings
 from app.schemas.enrichment import (
@@ -124,18 +125,12 @@ def _translate_with_fallback(text: str, *, tickers: list[str] | None) -> str:
 
 def _translate_text(text: str, *, tickers: list[str] | None) -> str:
     settings = get_settings()
-    masked = _mask_text(text, tickers=tickers)
-    translated = groq_chat_completion(
-        model=settings.groq_translation_model,
-        system_prompt=(
-            "You are a financial translation engine. "
-            "Translate the user text into natural Korean. "
-            "Preserve placeholders like ZXQKEEP0ZXQ exactly as written. "
-            "Do not add commentary. "
-            "Keep numbers, percentages, ticker symbols, and finance abbreviations intact."
-        ),
-        user_prompt=f"Translate this to Korean:\n\n{masked.text}",
-        temperature=0.0,
+    prepared = _prepare_translation_input(text, char_limit=settings.groq_translation_char_limit)
+    masked = _mask_text(prepared, tickers=tickers)
+    translated = _cached_translation_completion(
+        settings.groq_api_base_url,
+        settings.groq_translation_model,
+        masked.text,
     )
     return _unmask_text(translated, masked.replacements)
 
@@ -166,3 +161,27 @@ def _unmask_text(text: str, replacements: dict[str, str]) -> str:
     for placeholder, token in replacements.items():
         unmasked = unmasked.replace(placeholder, token)
     return unmasked
+
+
+@lru_cache(maxsize=512)
+def _cached_translation_completion(base_url: str, model: str, masked_text: str) -> str:
+    del base_url
+    return groq_chat_completion(
+        model=model,
+        system_prompt=(
+            "Translate financial text into natural Korean. "
+            "Keep placeholders unchanged. Keep numbers, percentages, tickers, and finance abbreviations exactly. "
+            "No commentary."
+        ),
+        user_prompt=masked_text,
+        temperature=0.0,
+    )
+
+
+def _prepare_translation_input(text: str, *, char_limit: int) -> str:
+    normalized = re.sub(r"\s+", " ", text).strip()
+    if len(normalized) <= char_limit:
+        return normalized
+
+    truncated = normalized[:char_limit].rsplit(" ", 1)[0].rstrip(",;:-")
+    return truncated or normalized[:char_limit]

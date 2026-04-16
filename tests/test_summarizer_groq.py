@@ -1,9 +1,11 @@
 from __future__ import annotations
 
 from app.services.summarizer import summarize_to_three_lines
+from app.services.summarizer.summarizer import _cached_summary_completion
 
 
 def test_summarizer_uses_groq_when_configured(monkeypatch) -> None:
+    _cached_summary_completion.cache_clear()
     monkeypatch.setenv("GROQ_API_KEY", "test-key")
     monkeypatch.setenv("GROQ_SUMMARY_MODEL", "llama-3.1-8b-instant")
 
@@ -48,6 +50,7 @@ def test_summarizer_uses_groq_when_configured(monkeypatch) -> None:
 
 
 def test_summarizer_splits_single_line_groq_output_into_three_sentences(monkeypatch) -> None:
+    _cached_summary_completion.cache_clear()
     monkeypatch.setenv("GROQ_API_KEY", "test-key")
     monkeypatch.setenv("GROQ_SUMMARY_MODEL", "llama-3.1-8b-instant")
 
@@ -92,6 +95,7 @@ def test_summarizer_splits_single_line_groq_output_into_three_sentences(monkeypa
 
 
 def test_summarizer_rejects_groq_output_with_invented_numbers(monkeypatch) -> None:
+    _cached_summary_completion.cache_clear()
     monkeypatch.setenv("GROQ_API_KEY", "test-key")
     monkeypatch.setenv("GROQ_SUMMARY_MODEL", "llama-3.1-8b-instant")
 
@@ -133,3 +137,31 @@ def test_summarizer_rejects_groq_output_with_invented_numbers(monkeypatch) -> No
         "Operating margin improved.",
         "Management raised full-year guidance.",
     ]
+
+
+def test_summarizer_skips_groq_for_oversized_articles(monkeypatch) -> None:
+    _cached_summary_completion.cache_clear()
+    monkeypatch.setenv("GROQ_API_KEY", "test-key")
+    monkeypatch.setenv("GROQ_SUMMARY_MODEL", "llama-3.1-8b-instant")
+    monkeypatch.setenv("GROQ_SUMMARY_HARD_CHAR_LIMIT", "100")
+
+    def _unexpected_post(*args, **kwargs):
+        raise AssertionError("Groq should not be called for oversized articles")
+
+    monkeypatch.setattr("app.services.groq.client.requests.post", _unexpected_post)
+
+    article_text = (
+        "Revenue rose 12% year over year. "
+        "Operating margin improved. "
+        "Management raised full-year guidance. "
+        "Demand remained strong across cloud and enterprise customers. "
+        "Shares rose after the earnings release."
+    )
+
+    summary = summarize_to_three_lines(
+        title="Company raises outlook after quarterly results",
+        article_text=article_text,
+    )
+
+    assert len(summary) == 3
+    assert all(line.strip() for line in summary)

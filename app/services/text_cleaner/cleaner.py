@@ -22,7 +22,15 @@ _BOILERPLATE_LINE_PATTERNS = [
     re.compile(r"^subscribe(?: now)?$", re.IGNORECASE),
     re.compile(r"^(?:privacy policy|cookie policy|terms of service)$", re.IGNORECASE),
     re.compile(r"^all rights reserved\.?$", re.IGNORECASE),
+    re.compile(r"^condensed consolidated statements? of .+$", re.IGNORECASE),
+    re.compile(r"^reconciliation of gaap to non-gaap .+$", re.IGNORECASE),
+    re.compile(r"^\(?in millions(?:, except per share data)?\)?$", re.IGNORECASE),
+    re.compile(r"^\(?unaudited\)?$", re.IGNORECASE),
+    re.compile(r"^table of contents$", re.IGNORECASE),
 ]
+_DATELINE_PREFIX_PATTERN = re.compile(
+    r"^[A-Z][A-Z .'-]{1,30},\s+[A-Z][a-z]{2,9}\.?\s+\d{1,2}\s*(?:\([^)]*\))?\s*[-:]\s*"
+)
 
 
 class ArticleTextValidationStatus(str, Enum):
@@ -105,6 +113,7 @@ def is_article_text_usable(text: str) -> bool:
 
 def _normalize_line_whitespace(line: str) -> str:
     normalized = _INTERNAL_WHITESPACE_PATTERN.sub(" ", line.strip())
+    normalized = _DATELINE_PREFIX_PATTERN.sub("", normalized)
     return normalized
 
 
@@ -113,7 +122,24 @@ def _is_safe_boilerplate_line(line: str) -> bool:
         return True
     if _URL_ONLY_LINE_PATTERN.match(line):
         return True
+    if _looks_like_table_header(line):
+        return True
     return any(pattern.match(line) for pattern in _BOILERPLATE_LINE_PATTERNS)
+
+
+def _looks_like_table_header(line: str) -> bool:
+    lowered = line.lower()
+    if "gaap" in lowered and "non-gaap" in lowered:
+        return True
+    if "condensed consolidated" in lowered:
+        return True
+    if "statements of income" in lowered or "balance sheets" in lowered:
+        return True
+    if "except per share data" in lowered or "in millions" in lowered:
+        return True
+    if len(line) > 45 and line.upper() == line and sum(ch.isalpha() for ch in line) >= 25:
+        return True
+    return False
 
 
 def _trim_noise_edges(lines: list[str]) -> list[str]:

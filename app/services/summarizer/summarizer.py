@@ -3,6 +3,7 @@ from __future__ import annotations
 import logging
 import re
 from dataclasses import dataclass
+from functools import lru_cache
 
 from app.core import get_settings
 from app.services.groq import groq_chat_completion, groq_is_enabled
@@ -103,7 +104,8 @@ def summarize_to_three_lines(title: str, article_text: str) -> list[str]:
     if not cleaned_text:
         return ["", "", ""]
 
-    groq_summary = _summarize_with_groq(title=title, article_text=cleaned_text)
+    groq_input = _prepare_summary_input(cleaned_text)
+    groq_summary = _summarize_with_groq(title=title, article_text=groq_input)
     if groq_summary is not None:
         return groq_summary
 
@@ -131,29 +133,18 @@ def _summarize_with_groq(*, title: str, article_text: str) -> list[str] | None:
         return None
 
     settings = get_settings()
+    if len(article_text) > settings.groq_summary_hard_char_limit:
+        logger.info(
+            "Groq summary skipped for oversized article; using heuristic fallback.",
+            extra={"article_text_length": len(article_text)},
+        )
+        return None
     try:
-        content = groq_chat_completion(
-            model=settings.groq_summary_model,
-            system_prompt=(
-                "You are a financial news summarizer. "
-                "Write exactly three Korean summary lines. "
-                "Each line must be a single sentence. "
-                "Keep each line short, self-contained, and usually under 90 Korean characters. "
-                "Preserve numbers, percentages, and ticker symbols exactly. "
-                "Never invent or alter any number, percentage, ticker, or factual detail. "
-                "If a detail is not explicitly stated in the article, omit it. "
-                "Do not exaggerate. "
-                "Do not repeat the title. "
-                "Do not use ellipses. "
-                "Ignore table headers, reconciliation labels, boilerplate, and footers. "
-                "Return only the three lines with no title, bullets, or commentary."
-            ),
-            user_prompt=(
-                f"Title: {title}\n\n"
-                "Article:\n"
-                f"{article_text}\n\n"
-                "Return exactly three Korean lines."
-            ),
+        content = _cached_summary_completion(
+            settings.groq_api_base_url,
+            settings.groq_summary_model,
+            title,
+            article_text,
         )
     except Exception:
         logger.exception("Groq summary generation failed; falling back to heuristic summarizer.")
@@ -215,6 +206,45 @@ def _summary_preserves_numeric_facts(lines: list[str], *, title: str, article_te
 
 def _extract_numeric_tokens(text: str) -> set[str]:
     return {match.group(0) for match in _NUMERIC_TOKEN_PATTERN.finditer(text)}
+
+
+@lru_cache(maxsize=256)
+def _cached_summary_completion(base_url: str, model: str, title: str, article_text: str) -> str:
+    del base_url
+    return groq_chat_completion(
+        model=model,
+        system_prompt=(
+            "Summarize a financial news article into exactly 3 Korean lines. "
+            "One sentence per line. Keep lines concise and complete. "
+            "Keep numbers, percentages, tickers, and facts unchanged. "
+            "Never invent missing details. Omit tables, boilerplate, and repeated title wording. "
+            "Return only 3 plain lines."
+        ),
+        user_prompt=f"Title: {title}\nArticle:\n{article_text}",
+    )
+
+
+def _prepare_summary_input(text: str) -> str:
+    settings = get_settings()
+    normalized = _normalize_text(text)
+    if len(normalized) <= settings.groq_summary_soft_char_limit:
+        return normalized
+
+    sentences = _extract_sentences(normalized)
+    if not sentences:
+        return normalized[: settings.groq_summary_soft_char_limit]
+
+    selected: list[str] = []
+    current_length = 0
+    for sentence in sentences:
+        sentence_length = len(sentence) + (2 if selected else 0)
+        if current_length + sentence_length > settings.groq_summary_soft_char_limit:
+            break
+        selected.append(sentence)
+        current_length += sentence_length
+
+    prepared = " ".join(selected).strip()
+    return prepared or normalized[: settings.groq_summary_soft_char_limit]
 
 
 def _extract_sentences(text: str) -> list[str]:

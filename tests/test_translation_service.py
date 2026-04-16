@@ -2,10 +2,12 @@ from __future__ import annotations
 
 from app.schemas.enrichment import SummaryLine, XAIHighlightItem, XAIPayload
 from app.schemas.enrichment import SentimentLabel
+from app.services.translation.deepl_service import _cached_translation_completion
 from app.services.translation.deepl_service import build_localized_content
 
 
 def test_build_localized_content_falls_back_without_api_key(monkeypatch) -> None:
+    _cached_translation_completion.cache_clear()
     monkeypatch.delenv("GROQ_API_KEY", raising=False)
 
     localized = build_localized_content(
@@ -42,6 +44,7 @@ def test_build_localized_content_falls_back_without_api_key(monkeypatch) -> None
 
 
 def test_build_localized_content_uses_groq_when_api_key_present(monkeypatch) -> None:
+    _cached_translation_completion.cache_clear()
     monkeypatch.setenv("GROQ_API_KEY", "test-key")
     monkeypatch.setenv("GROQ_API_BASE_URL", "https://api.groq.com/openai")
     monkeypatch.setenv("GROQ_TRANSLATION_MODEL", "llama-3.1-8b-instant")
@@ -98,3 +101,52 @@ def test_build_localized_content_uses_groq_when_api_key_present(monkeypatch) -> 
     assert localized.xai is not None
     assert localized.xai.explanation == "강세 판단에 영향을 준 핵심 문장입니다."
     assert localized.xai.highlights[0].excerpt == "가이던스가 상향되었습니다."
+
+
+def test_build_localized_content_reuses_cached_groq_translations(monkeypatch) -> None:
+    _cached_translation_completion.cache_clear()
+    monkeypatch.setenv("GROQ_API_KEY", "test-key")
+    monkeypatch.setenv("GROQ_API_BASE_URL", "https://api.groq.com/openai/v1")
+    monkeypatch.setenv("GROQ_TRANSLATION_MODEL", "llama-3.1-8b-instant")
+
+    calls = {"count": 0}
+    translated_values = iter(
+        [
+            "애플이 가이던스를 상향했습니다",
+            "매출은 12% 증가했습니다.",
+            "마진이 개선되었습니다.",
+            "가이던스가 상향되었습니다.",
+        ]
+    )
+
+    class _Response:
+        def raise_for_status(self) -> None:
+            return None
+
+        def json(self) -> dict[str, object]:
+            calls["count"] += 1
+            return {"choices": [{"message": {"content": next(translated_values)}}]}
+
+    def _fake_post(*args, **kwargs):
+        return _Response()
+
+    monkeypatch.setattr("app.services.groq.client.requests.post", _fake_post)
+
+    kwargs = dict(
+        title="Apple raises guidance",
+        summary_3lines=[
+            SummaryLine(line_number=1, text="Revenue grew 12%."),
+            SummaryLine(line_number=2, text="Margins improved."),
+            SummaryLine(line_number=3, text="Guidance was raised."),
+        ],
+        xai=None,
+        sentiment_label=SentimentLabel.BULLISH,
+        tickers=["AAPL"],
+    )
+
+    first = build_localized_content(**kwargs)
+    second = build_localized_content(**kwargs)
+
+    assert first.title == second.title
+    assert first.summary_3lines[0].text == second.summary_3lines[0].text
+    assert calls["count"] == 4
