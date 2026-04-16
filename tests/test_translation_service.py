@@ -3,6 +3,7 @@ from __future__ import annotations
 from app.schemas.enrichment import SummaryLine, XAIHighlightItem, XAIPayload
 from app.schemas.enrichment import SentimentLabel
 from app.services.translation.deepl_service import _cached_translation_completion
+from app.services.translation.deepl_service import _polish_korean_financial_text
 from app.services.translation.deepl_service import build_localized_content
 
 
@@ -150,3 +151,11 @@ def test_build_localized_content_reuses_cached_groq_translations(monkeypatch) ->
     assert first.title == second.title
     assert first.summary_3lines[0].text == second.summary_3lines[0].text
     assert calls["count"] == 4
+
+
+def test_polish_korean_financial_text_normalizes_literal_finance_phrases() -> None:
+    polished = _polish_korean_financial_text(
+        "매니저들은 올해 전망을 높였다고 합니다. 운영 마진은 향상되었다."
+    )
+
+    assert polished == "경영진은 올해 가이던스를 상향했다고 밝혔다. 운영 마진은 개선됐다."

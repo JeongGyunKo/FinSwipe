@@ -214,13 +214,21 @@ def _cached_summary_completion(base_url: str, model: str, title: str, article_te
     return groq_chat_completion(
         model=model,
         system_prompt=(
-            "Summarize a financial news article into exactly 3 Korean lines. "
-            "One sentence per line. Keep lines concise and complete. "
-            "Keep numbers, percentages, tickers, and facts unchanged. "
-            "Never invent missing details. Omit tables, boilerplate, and repeated title wording. "
-            "Return only 3 plain lines."
+            "You are a Korean financial news editor. "
+            "Rewrite the article into exactly 3 Korean summary lines. "
+            "Use neutral financial news style and declarative '-했다' sentences. "
+            "Write exactly one complete sentence per line. "
+            "Keep each line concise, natural, and self-contained. "
+            "Keep numbers, percentages, dates, currencies, ticker symbols, and factual details unchanged. "
+            "Never invent or infer missing details. "
+            "Do not repeat the title. "
+            "Do not use bullets, numbering, quotes, commentary, or ellipses. "
+            "Ignore tables, reconciliation labels, datelines, boilerplate, and footer text. "
+            "Prefer concrete business facts such as revenue, guidance, margins, demand, dividends, and outlook. "
+            "Return only 3 plain Korean lines."
         ),
         user_prompt=f"Title: {title}\nArticle:\n{article_text}",
+        temperature=0.0,
     )
 
 

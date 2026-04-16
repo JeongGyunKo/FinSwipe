@@ -132,7 +132,7 @@ def _translate_text(text: str, *, tickers: list[str] | None) -> str:
         settings.groq_translation_model,
         masked.text,
     )
-    return _unmask_text(translated, masked.replacements)
+    return _polish_korean_financial_text(_unmask_text(translated, masked.replacements))
 
 
 def _mask_text(text: str, *, tickers: list[str] | None) -> _MaskedText:
@@ -169,9 +169,13 @@ def _cached_translation_completion(base_url: str, model: str, masked_text: str) 
     return groq_chat_completion(
         model=model,
         system_prompt=(
-            "Translate financial text into natural Korean. "
-            "Keep placeholders unchanged. Keep numbers, percentages, tickers, and finance abbreviations exactly. "
-            "No commentary."
+            "You are a Korean financial news translator. "
+            "Translate the input into natural Korean financial news style. "
+            "Use concise declarative 기사체 and avoid literal translation. "
+            "Prefer established financial terminology such as '가이던스', '전년 대비', and '경영진' when appropriate. "
+            "Keep placeholders unchanged. "
+            "Keep numbers, percentages, dates, currencies, ticker symbols, and finance abbreviations exactly as written. "
+            "Do not add commentary, quotation marks, bullets, or explanations."
         ),
         user_prompt=masked_text,
         temperature=0.0,
@@ -185,3 +189,26 @@ def _prepare_translation_input(text: str, *, char_limit: int) -> str:
 
     truncated = normalized[:char_limit].rsplit(" ", 1)[0].rstrip(",;:-")
     return truncated or normalized[:char_limit]
+
+
+def _polish_korean_financial_text(text: str) -> str:
+    polished = text.strip()
+    replacements = (
+        ("매니저들", "경영진"),
+        ("매니저들은", "경영진은"),
+        ("매니저는", "경영진은"),
+        ("관리진", "경영진"),
+        ("전망을 높였다고", "가이던스를 상향했다고"),
+        ("했다고 합니다.", "했다고 밝혔다."),
+        ("라고 합니다.", "라고 밝혔다."),
+        ("라고 말했다.", "라고 밝혔다."),
+        ("말했습니다.", "밝혔다."),
+        ("말했다.", "밝혔다."),
+        ("전망을 높였다", "가이던스를 상향했다"),
+        ("강력하게 유지", "견조했다"),
+        ("향상되었다고 합니다.", "개선됐다."),
+        ("향상되었다.", "개선됐다."),
+    )
+    for source, target in replacements:
+        polished = polished.replace(source, target)
+    return polished
