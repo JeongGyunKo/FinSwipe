@@ -26,6 +26,11 @@ _FAILURE_STATUS_BY_STAGE = {
     PipelineStageName.PERSIST: AnalysisStatus.PERSIST_FAILED,
 }
 
+_FILTERED_STATUS_BY_STAGE = {
+    PipelineStageName.CLEAN: AnalysisStatus.CLEAN_FILTERED,
+    PipelineStageName.VALIDATE: AnalysisStatus.VALIDATE_FILTERED,
+}
+
 _STAGE_ORDER = [
     PipelineStageName.FETCH,
     PipelineStageName.CLEAN,
@@ -101,6 +106,15 @@ class PipelineStatusTracker:
         record.completed_at = _utcnow()
         record.fatal = False
 
+    def filter(self, stage: PipelineStageName, message: str) -> None:
+        record = self._stages[stage]
+        if record.started_at is None:
+            record.started_at = _utcnow()
+        record.status = PipelineStageStatus.FILTERED
+        record.message = message
+        record.completed_at = _utcnow()
+        record.fatal = False
+
     def snapshot_stage_statuses(self) -> list[PipelineStageResult]:
         return [
             PipelineStageResult(
@@ -126,6 +140,15 @@ class PipelineStatusTracker:
         if fatal_failures:
             failed_stage = fatal_failures[0].stage
             return _FAILURE_STATUS_BY_STAGE[failed_stage], AnalysisOutcome.FATAL_FAILURE
+
+        filtered_stages = [
+            record
+            for record in self._stages.values()
+            if record.status == PipelineStageStatus.FILTERED
+        ]
+        if filtered_stages:
+            filtered_stage = filtered_stages[0].stage
+            return _FILTERED_STATUS_BY_STAGE[filtered_stage], AnalysisOutcome.FILTERED
 
         nonfatal_failures = [
             record

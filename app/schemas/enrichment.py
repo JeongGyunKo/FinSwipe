@@ -49,6 +49,7 @@ class EnrichmentStatus(str, Enum):
     PROCESSING = "processing"
     COMPLETED = "completed"
     PARTIAL = "partial"
+    FILTERED = "filtered"
     FAILED = "failed"
 
 
@@ -69,6 +70,7 @@ class StageStatus(str, Enum):
     IN_PROGRESS = "in_progress"
     COMPLETED = "completed"
     FAILED = "failed"
+    FILTERED = "filtered"
     SKIPPED = "skipped"
 
 
@@ -375,7 +377,7 @@ class ArticleEnrichmentResponse(SchemaModel):
         description="Mixed/conflict analysis output.",
     )
     status: EnrichmentStatus = Field(..., description="Overall pipeline status.")
-    outcome: Literal["success", "partial_success", "fatal_failure"] = Field(
+    outcome: Literal["success", "partial_success", "filtered", "fatal_failure"] = Field(
         ...,
         description="Top-level outcome separating success, partial success, and fatal failure.",
     )

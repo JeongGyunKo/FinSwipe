@@ -23,6 +23,7 @@ class PublisherOutcomeMetric(SchemaModel):
     total_count: int = Field(..., ge=0)
     success_count: int = Field(..., ge=0)
     partial_success_count: int = Field(..., ge=0)
+    filtered_count: int = Field(..., ge=0)
     fatal_failure_count: int = Field(..., ge=0)
 
 

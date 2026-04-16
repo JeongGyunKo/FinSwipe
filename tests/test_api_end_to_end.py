@@ -124,6 +124,40 @@ def _build_completed_payload(request: ArticleEnrichmentRequest) -> EnrichmentSto
     )
 
 
+def _build_filtered_payload(request: ArticleEnrichmentRequest) -> EnrichmentStoragePayload:
+    now = datetime.now(timezone.utc)
+    return EnrichmentStoragePayload(
+        news_id=request.news_id,
+        title=request.title,
+        link=str(request.link),
+        summary_3lines=[],
+        sentiment=None,
+        xai=None,
+        article_mixed=None,
+        ticker_mixed=None,
+        analysis_status=AnalysisStatus.CLEAN_FILTERED,
+        analysis_outcome=AnalysisOutcome.FILTERED,
+        analyzed_at=now,
+        cleaned_text_available=False,
+        fetch_result=ArticleFetchResult(
+            link=str(request.link),
+            publisher_domain="example.com",
+            final_url=str(request.link),
+            content_type="text/html; charset=utf-8",
+            extraction_source=ArticleTextSource.PARAGRAPH_BLOCKS,
+            attempt_count=1,
+            raw_text="Transcript header only",
+            cleaned_text="",
+            fetch_status=ArticleFetchStatus.SUCCESS,
+            retryable=False,
+            failure_category=None,
+            error_message=None,
+        ),
+        stage_statuses=[],
+        errors=[],
+    )
+
+
 def test_news_intake_worker_and_status_flow(monkeypatch) -> None:
     repository = InMemoryEnrichmentRepository()
     service = IngestionService(repository=repository)
@@ -212,6 +246,55 @@ def test_news_intake_worker_and_status_flow(monkeypatch) -> None:
     assert result_payload["result"]["xai"]["highlights"][0]["excerpt"] == (
         "Revenue growth stayed ahead of expectations."
     )
+
+
+def test_news_result_exposes_filtered_content_without_error(monkeypatch) -> None:
+    repository = InMemoryEnrichmentRepository()
+    service = IngestionService(repository=repository)
+    job_service = JobProcessingService(repository=repository)
+
+    def _run_and_persist_filtered(raw_news: ArticleEnrichmentRequest) -> EnrichmentStoragePayload:
+        payload = _build_filtered_payload(raw_news)
+        repository.save_enrichment_result(
+            SaveEnrichmentRequest(raw_news=raw_news, enrichment=payload)
+        )
+        return payload
+
+    monkeypatch.setattr(ingestion_route_module, "service", service)
+    monkeypatch.setattr(ingestion_route_module, "job_service", job_service)
+    monkeypatch.setattr(job_service.orchestrator, "run", _run_and_persist_filtered)
+
+    client = TestClient(app)
+    client.post(
+        "/api/v1/news/intake",
+        json={
+            "news_id": "filtered-news-1",
+            "title": "Transcript header only",
+            "link": "https://example.com/articles/filtered-news-1",
+            "ticker": ["AAPL"],
+            "source": "Reuters",
+        },
+    )
+
+    worker_response = client.post("/api/v1/jobs/process-next")
+    worker_payload = worker_response.json()
+
+    assert worker_response.status_code == 200
+    assert worker_payload["processing_state"] == "completed"
+    assert worker_payload["error_code"] is None
+    assert worker_payload["analysis_status"] == "clean_filtered"
+    assert worker_payload["analysis_outcome"] == "filtered"
+
+    result_response = client.get("/api/v1/news/filtered-news-1/result")
+    result_payload = result_response.json()
+
+    assert result_response.status_code == 200
+    assert result_payload["processing_state"] == "completed"
+    assert result_payload["error_code"] is None
+    assert result_payload["result"]["status"] == "filtered"
+    assert result_payload["result"]["outcome"] == "filtered"
+    assert result_payload["result"]["error"] is None
+    assert result_payload["latest_job"]["status"] == "completed"
 
 
 def test_enrich_endpoint_returns_job_submission_response(monkeypatch) -> None:

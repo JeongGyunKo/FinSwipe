@@ -137,3 +137,48 @@ def test_claim_next_job_picks_retry_pending_when_due() -> None:
     next_claim = repository.claim_next_enrichment_job()
     assert next_claim is not None
     assert next_claim.status.value == "processing"
+
+
+def test_process_next_job_marks_filtered_result_completed(monkeypatch) -> None:
+    repository = InMemoryEnrichmentRepository()
+    service = JobProcessingService(repository=repository)
+    request = ArticleEnrichmentRequest(
+        news_id="news-filtered",
+        title="Transcript page",
+        link="https://example.com/transcript",
+    )
+    repository.upsert_raw_news(request)
+    repository.create_enrichment_job("news-filtered", max_attempts=3)
+
+    monkeypatch.setattr(
+        service.orchestrator,
+        "run",
+        lambda raw_news: EnrichmentStoragePayload(
+            news_id="news-filtered",
+            title="Transcript page",
+            link="https://example.com/transcript",
+            analysis_status=AnalysisStatus.CLEAN_FILTERED,
+            analysis_outcome=AnalysisOutcome.FILTERED,
+            cleaned_text_available=False,
+            fetch_result=ArticleFetchResult(
+                link="https://example.com/transcript",
+                raw_text="",
+                cleaned_text="",
+                fetch_status=ArticleFetchStatus.SUCCESS,
+                retryable=False,
+                error_message=None,
+            ),
+            stage_statuses=[],
+            errors=[],
+        ),
+    )
+
+    result = service.process_next_job()
+
+    assert result.retry_scheduled is False
+    assert result.job is not None
+    assert result.job.status.value == "completed"
+    assert result.processing_state.value == "completed"
+    assert result.error_code is None
+    assert result.analysis_status == AnalysisStatus.CLEAN_FILTERED
+    assert result.analysis_outcome == AnalysisOutcome.FILTERED

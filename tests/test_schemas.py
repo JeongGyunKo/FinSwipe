@@ -56,3 +56,26 @@ def test_storage_payload_serializes_stage_statuses() -> None:
     assert dumped["analysis_status"] == "completed"
     assert dumped["stage_statuses"][0]["stage"] == "fetch"
     assert dumped["stage_statuses"][0]["status"] == "completed"
+
+
+def test_storage_payload_supports_filtered_outcome_and_stage() -> None:
+    payload = EnrichmentStoragePayload(
+        news_id="news-filtered",
+        title="Filtered title",
+        link="https://example.com/news-filtered",
+        analysis_status=AnalysisStatus.CLEAN_FILTERED,
+        analysis_outcome=AnalysisOutcome.FILTERED,
+        stage_statuses=[
+            PipelineStageResult(
+                stage=PipelineStageName.CLEAN,
+                status=PipelineStageStatus.FILTERED,
+                message="Text cleaning produced no usable article text.",
+            )
+        ],
+    )
+
+    dumped = payload.model_dump(mode="json")
+
+    assert dumped["analysis_status"] == "clean_filtered"
+    assert dumped["analysis_outcome"] == "filtered"
+    assert dumped["stage_statuses"][0]["status"] == "filtered"

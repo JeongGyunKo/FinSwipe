@@ -296,18 +296,17 @@ class EnrichmentOrchestrator:
         if not cleaned_text.strip():
             log_event(
                 logger,
-                logging.WARNING,
-                "text_clean_failed",
+                logging.INFO,
+                "text_clean_filtered",
                 error="Text cleaning produced no usable article text.",
             )
-            tracker.fail(
+            tracker.filter(
                 PipelineStageName.CLEAN,
                 "Text cleaning produced no usable article text.",
-                fatal=True,
             )
             tracker.skip(
                 PipelineStageName.VALIDATE,
-                "Skipped because text cleaning produced no usable article text.",
+                "Skipped because text cleaning filtered out the article text.",
             )
             self._skip_after_validation_failure(tracker)
             return "", False
@@ -325,16 +324,15 @@ class EnrichmentOrchestrator:
         if not validation.is_valid:
             log_event(
                 logger,
-                logging.WARNING,
-                "text_validate_failed",
+                logging.INFO,
+                "text_validate_filtered",
                 reason=validation.reason,
                 word_count=validation.word_count,
                 character_count=validation.character_count,
             )
-            tracker.fail(
+            tracker.filter(
                 PipelineStageName.VALIDATE,
                 validation.reason or "Article text validation failed.",
-                fatal=True,
             )
             self._skip_after_validation_failure(tracker)
             return cleaned_text, False

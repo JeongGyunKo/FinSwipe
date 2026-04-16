@@ -237,6 +237,8 @@ def _build_mixed_flags(
 def _build_error_detail(
     payload: EnrichmentStoragePayload,
 ) -> ErrorDetail | None:
+    if payload.analysis_outcome == AnalysisOutcome.FILTERED:
+        return None
     if not payload.errors:
         return None
 
@@ -279,6 +281,7 @@ def _map_stage_status(stage: object) -> InternalStageStatus:
         "pending": StageStatus.NOT_STARTED,
         "completed": StageStatus.COMPLETED,
         "failed": StageStatus.FAILED,
+        "filtered": StageStatus.FILTERED,
         "skipped": StageStatus.SKIPPED,
     }
 
@@ -304,6 +307,8 @@ def _map_overall_status(
         return EnrichmentStatus.COMPLETED
     if analysis_outcome == AnalysisOutcome.PARTIAL_SUCCESS:
         return EnrichmentStatus.PARTIAL
+    if analysis_outcome == AnalysisOutcome.FILTERED:
+        return EnrichmentStatus.FILTERED
     return EnrichmentStatus.FAILED
 
 

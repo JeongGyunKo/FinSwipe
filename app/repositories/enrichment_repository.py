@@ -1508,7 +1508,7 @@ def _build_operational_stats(
     extraction_source_counts: dict[str, int] = {}
     fetch_failure_category_counts: dict[str, int] = {}
     domain_failure_counts: dict[str, tuple[int, int]] = {}
-    domain_outcome_counts: dict[str, tuple[int, int, int, int]] = {}
+    domain_outcome_counts: dict[str, tuple[int, int, int, int, int]] = {}
     job_status_counts: dict[str, int] = {}
 
     for job in jobs:
@@ -1530,15 +1530,18 @@ def _build_operational_stats(
             if fetch_result is not None and fetch_result.publisher_domain
             else "unknown"
         )
-        total_count, success_count, partial_count, fatal_count = domain_outcome_counts.get(
+        total_count, success_count, partial_count, filtered_count, fatal_count = domain_outcome_counts.get(
             domain_key,
-            (0, 0, 0, 0),
+            (0, 0, 0, 0, 0),
         )
         domain_outcome_counts[domain_key] = (
             total_count + 1,
             success_count + (1 if enrichment.analysis_outcome == AnalysisOutcome.SUCCESS else 0),
             partial_count + (
                 1 if enrichment.analysis_outcome == AnalysisOutcome.PARTIAL_SUCCESS else 0
+            ),
+            filtered_count + (
+                1 if enrichment.analysis_outcome == AnalysisOutcome.FILTERED else 0
             ),
             fatal_count + (1 if enrichment.analysis_outcome == AnalysisOutcome.FATAL_FAILURE else 0),
         )
@@ -1639,7 +1642,7 @@ def _sorted_domain_metrics(
 
 
 def _sorted_outcome_metrics(
-    counts: dict[str, tuple[int, int, int, int]]
+    counts: dict[str, tuple[int, int, int, int, int]]
 ) -> list[PublisherOutcomeMetric]:
     return [
         PublisherOutcomeMetric(
@@ -1647,12 +1650,14 @@ def _sorted_outcome_metrics(
             total_count=total_count,
             success_count=success_count,
             partial_success_count=partial_success_count,
+            filtered_count=filtered_count,
             fatal_failure_count=fatal_failure_count,
         )
         for domain, (
             total_count,
             success_count,
             partial_success_count,
+            filtered_count,
             fatal_failure_count,
         ) in sorted(
             counts.items(),

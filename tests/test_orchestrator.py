@@ -553,3 +553,84 @@ def test_orchestrator_keeps_xai_when_summary_generation_fails(monkeypatch) -> No
         stage.stage.value == "xai" and stage.status.value == "completed"
         for stage in payload.stage_statuses
     )
+
+
+def test_orchestrator_marks_empty_clean_output_as_filtered(monkeypatch) -> None:
+    monkeypatch.setattr(
+        "app.services.orchestrator.pipeline.fetch_article_text",
+        lambda link: ArticleFetchResult(
+            link=link,
+            raw_text="raw text that gets filtered",
+            cleaned_text="",
+            fetch_status=ArticleFetchStatus.SUCCESS,
+            error_message=None,
+        ),
+    )
+    monkeypatch.setattr(
+        "app.services.orchestrator.pipeline.clean_article_text",
+        lambda text: "   ",
+    )
+
+    repository = InMemoryEnrichmentRepository()
+    orchestrator = EnrichmentOrchestrator(repository=repository, include_xai=True)
+    request = ArticleEnrichmentRequest(
+        news_id="news-filtered-clean",
+        title="Transcript only page",
+        link="https://example.com/news/filtered-clean",
+        ticker=["AAPL"],
+    )
+
+    payload = orchestrator.run(request)
+
+    assert payload.analysis_status == AnalysisStatus.CLEAN_FILTERED
+    assert payload.analysis_outcome == AnalysisOutcome.FILTERED
+    assert payload.errors == []
+    assert any(
+        stage.stage.value == "clean" and stage.status.value == "filtered"
+        for stage in payload.stage_statuses
+    )
+
+
+def test_orchestrator_marks_invalid_text_as_filtered(monkeypatch) -> None:
+    monkeypatch.setattr(
+        "app.services.orchestrator.pipeline.fetch_article_text",
+        lambda link: ArticleFetchResult(
+            link=link,
+            raw_text="short text",
+            cleaned_text="",
+            fetch_status=ArticleFetchStatus.SUCCESS,
+            error_message=None,
+        ),
+    )
+    monkeypatch.setattr(
+        "app.services.orchestrator.pipeline.clean_article_text",
+        lambda text: "short cleaned text",
+    )
+    monkeypatch.setattr(
+        "app.services.orchestrator.pipeline.validate_article_text",
+        lambda text: SimpleNamespace(
+            is_valid=False,
+            reason="Article text is too short after cleaning.",
+            word_count=3,
+            character_count=len(text),
+        ),
+    )
+
+    repository = InMemoryEnrichmentRepository()
+    orchestrator = EnrichmentOrchestrator(repository=repository, include_xai=True)
+    request = ArticleEnrichmentRequest(
+        news_id="news-filtered-validate",
+        title="Insufficient body",
+        link="https://example.com/news/filtered-validate",
+        ticker=["AAPL"],
+    )
+
+    payload = orchestrator.run(request)
+
+    assert payload.analysis_status == AnalysisStatus.VALIDATE_FILTERED
+    assert payload.analysis_outcome == AnalysisOutcome.FILTERED
+    assert payload.errors == []
+    assert any(
+        stage.stage.value == "validate" and stage.status.value == "filtered"
+        for stage in payload.stage_statuses
+    )

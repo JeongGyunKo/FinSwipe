@@ -19,7 +19,9 @@ class AnalysisStatus(str, Enum):
     PENDING = "pending"
     FETCH_FAILED = "fetch_failed"
     CLEAN_FAILED = "clean_failed"
+    CLEAN_FILTERED = "clean_filtered"
     VALIDATE_FAILED = "validate_failed"
+    VALIDATE_FILTERED = "validate_filtered"
     SUMMARIZE_FAILED = "summarize_failed"
     SENTIMENT_FAILED = "sentiment_failed"
     XAI_FAILED = "xai_failed"
@@ -33,6 +35,7 @@ class AnalysisStatus(str, Enum):
 class AnalysisOutcome(str, Enum):
     SUCCESS = "success"
     PARTIAL_SUCCESS = "partial_success"
+    FILTERED = "filtered"
     FATAL_FAILURE = "fatal_failure"
 
 
@@ -52,6 +55,7 @@ class PipelineStageStatus(str, Enum):
     PENDING = "pending"
     COMPLETED = "completed"
     FAILED = "failed"
+    FILTERED = "filtered"
     SKIPPED = "skipped"
 
 
