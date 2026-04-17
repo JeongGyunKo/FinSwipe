@@ -44,7 +44,7 @@ def test_orchestrator_marks_partial_failure_when_xai_stage_fails(monkeypatch) ->
     )
     monkeypatch.setattr(
         "app.services.orchestrator.pipeline.validate_article_text",
-        lambda text: SimpleNamespace(
+        lambda text, **kwargs: SimpleNamespace(
             is_valid=True,
             reason=None,
             word_count=16,
@@ -173,7 +173,7 @@ def test_orchestrator_skips_xai_in_base_pipeline_by_default(monkeypatch) -> None
     )
     monkeypatch.setattr(
         "app.services.orchestrator.pipeline.validate_article_text",
-        lambda text: SimpleNamespace(
+        lambda text, **kwargs: SimpleNamespace(
             is_valid=True,
             reason=None,
             word_count=16,
@@ -300,7 +300,7 @@ def test_orchestrator_skips_xai_when_backend_is_disabled(monkeypatch) -> None:
     )
     monkeypatch.setattr(
         "app.services.orchestrator.pipeline.validate_article_text",
-        lambda text: SimpleNamespace(
+        lambda text, **kwargs: SimpleNamespace(
             is_valid=True,
             reason=None,
             word_count=16,
@@ -434,7 +434,7 @@ def test_orchestrator_keeps_xai_when_summary_generation_fails(monkeypatch) -> No
     )
     monkeypatch.setattr(
         "app.services.orchestrator.pipeline.validate_article_text",
-        lambda text: SimpleNamespace(
+        lambda text, **kwargs: SimpleNamespace(
             is_valid=True,
             reason=None,
             word_count=16,
@@ -608,7 +608,7 @@ def test_orchestrator_marks_invalid_text_as_filtered(monkeypatch) -> None:
     )
     monkeypatch.setattr(
         "app.services.orchestrator.pipeline.validate_article_text",
-        lambda text: SimpleNamespace(
+        lambda text, **kwargs: SimpleNamespace(
             is_valid=False,
             reason="Article text is too short after cleaning.",
             word_count=3,

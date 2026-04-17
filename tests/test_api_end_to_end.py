@@ -32,6 +32,7 @@ from app.schemas.storage import (
     build_stored_sentiment_payload,
 )
 from app.schemas.xai import XAIContributionDirection, XAIHighlight, XAIResult
+from app.services.enrichment_service import EnrichmentService
 from app.services.ingestion_service import IngestionService
 from app.services.job_processing_service import JobProcessingService
 
@@ -297,11 +298,19 @@ def test_news_result_exposes_filtered_content_without_error(monkeypatch) -> None
     assert result_payload["latest_job"]["status"] == "completed"
 
 
-def test_enrich_endpoint_returns_job_submission_response(monkeypatch) -> None:
+def test_enrich_endpoint_returns_immediate_result(monkeypatch) -> None:
     repository = InMemoryEnrichmentRepository()
-    service = IngestionService(repository=repository)
+    service = EnrichmentService(repository=repository)
+
+    def _run_and_persist(raw_news: ArticleEnrichmentRequest) -> EnrichmentStoragePayload:
+        payload = _build_completed_payload(raw_news)
+        repository.save_enrichment_result(
+            SaveEnrichmentRequest(raw_news=raw_news, enrichment=payload)
+        )
+        return payload
 
     monkeypatch.setattr(enrichment_route_module, "service", service)
+    monkeypatch.setattr(service.orchestrator, "run", _run_and_persist)
 
     client = TestClient(app)
     response = client.post(
@@ -315,20 +324,34 @@ def test_enrich_endpoint_returns_job_submission_response(monkeypatch) -> None:
         },
     )
 
-    assert response.status_code == 202
+    assert response.status_code == 200
     body = response.json()
     assert body["news_id"] == "enrich-news-1"
-    assert body["queued"] is True
-    assert body["processing_state"] == "queued"
-    assert body["error_code"] is None
-    assert body["job"]["status"] == "queued"
+    assert body["status"] == "completed"
+    assert body["outcome"] == "success"
+    assert len(body["summary_3lines"]) == 3
+    assert body["localized"]["sentiment_label"] == "강세"
 
 
-def test_enrich_endpoint_accepts_text_alias_and_queues_direct_text(monkeypatch) -> None:
+def test_enrich_endpoint_accepts_text_alias_and_returns_direct_text_result(monkeypatch) -> None:
     repository = InMemoryEnrichmentRepository()
-    service = IngestionService(repository=repository)
+    service = EnrichmentService(repository=repository)
+
+    def _run_with_text_and_persist(
+        raw_news: ArticleEnrichmentRequest,
+        *,
+        article_text: str | None = None,
+        summary_text: str | None = None,
+    ) -> EnrichmentStoragePayload:
+        payload = _build_completed_payload(raw_news)
+        payload.fetch_result.extraction_source = ArticleTextSource.PROVIDED_SUMMARY_TEXT
+        repository.save_enrichment_result(
+            SaveEnrichmentRequest(raw_news=raw_news, enrichment=payload)
+        )
+        return payload
 
     monkeypatch.setattr(enrichment_route_module, "service", service)
+    monkeypatch.setattr(service.orchestrator, "run_with_text", _run_with_text_and_persist)
 
     client = TestClient(app)
     response = client.post(
@@ -343,14 +366,12 @@ def test_enrich_endpoint_accepts_text_alias_and_queues_direct_text(monkeypatch) 
         },
     )
 
-    assert response.status_code == 202
+    assert response.status_code == 200
     body = response.json()
-    assert body["queued"] is True
-    assert body["processing_state"] == "queued"
-    assert body["error_code"] is None
-    stored = repository.get_raw_news("enrich-news-text-1")
-    assert stored is not None
-    assert getattr(stored, "summary_text", None) == "Revenue growth stayed ahead of expectations."
+    assert body["news_id"] == "enrich-news-text-1"
+    assert body["status"] == "completed"
+    assert body["outcome"] == "success"
+    assert body["summary_3lines"][0]["text"] == "Revenue growth stayed ahead of expectations."
 
 
 def test_news_intake_text_worker_and_status_flow(monkeypatch) -> None:
@@ -542,11 +563,25 @@ def test_news_intake_treats_empty_placeholder_as_missing_text(monkeypatch) -> No
     )
 
 
-def test_enrich_text_endpoint_queues_direct_text(monkeypatch) -> None:
+def test_enrich_text_endpoint_returns_immediate_direct_text_result(monkeypatch) -> None:
     repository = InMemoryEnrichmentRepository()
-    service = IngestionService(repository=repository)
+    service = EnrichmentService(repository=repository)
+
+    def _run_with_text_and_persist(
+        raw_news: ArticleEnrichmentRequest,
+        *,
+        article_text: str | None = None,
+        summary_text: str | None = None,
+    ) -> EnrichmentStoragePayload:
+        payload = _build_completed_payload(raw_news)
+        payload.fetch_result.extraction_source = ArticleTextSource.PROVIDED_ARTICLE_TEXT
+        repository.save_enrichment_result(
+            SaveEnrichmentRequest(raw_news=raw_news, enrichment=payload)
+        )
+        return payload
 
     monkeypatch.setattr(enrichment_route_module, "service", service)
+    monkeypatch.setattr(service.orchestrator, "run_with_text", _run_with_text_and_persist)
 
     client = TestClient(app)
     response = client.post(
@@ -565,67 +600,62 @@ def test_enrich_text_endpoint_queues_direct_text(monkeypatch) -> None:
         },
     )
 
-    assert response.status_code == 202
+    assert response.status_code == 200
     body = response.json()
-    assert body["queued"] is True
-    assert body["processing_state"] == "queued"
-    assert body["error_code"] is None
-    stored = repository.get_raw_news("direct-text-news-1")
-    assert stored is not None
-    assert getattr(stored, "article_text", None) is not None
+    assert body["news_id"] == "direct-text-news-1"
+    assert body["status"] == "completed"
+    assert body["localized"]["title"] == "Company beats earnings estimates"
 
 
-def test_direct_enrichment_reuses_existing_active_job(monkeypatch) -> None:
-    request = ArticleEnrichmentRequest(
-        news_id="render-queued-enrich-1",
-        title="Queued direct enrich",
-        link="https://example.com/articles/render-queued-enrich-1",
-        ticker=["AAPL"],
-        source="Reuters",
+def test_direct_enrichment_can_wait_on_worker_backed_flow(monkeypatch) -> None:
+    repository = InMemoryEnrichmentRepository()
+    service = EnrichmentService(repository=repository)
+    payload = _build_completed_payload(
+        ArticleEnrichmentRequest(
+            news_id="render-queued-enrich-1",
+            title="Queued direct enrich",
+            link="https://example.com/articles/render-queued-enrich-1",
+            ticker=["AAPL"],
+            source="Reuters",
+        )
     )
-    now = datetime.now(timezone.utc)
-    active_job = EnrichmentJobRecord(
-        job_id="render-job-1",
-        news_id=request.news_id,
-        status=EnrichmentJobStatus.QUEUED,
-        attempts=0,
-        max_attempts=3,
-        last_error=None,
-        last_analysis_status=None,
-        created_at=now,
-        updated_at=now,
-        next_retry_at=None,
-        started_at=None,
-        completed_at=None,
-    )
-    class FakeRepository:
-        def upsert_raw_news(self, raw_news) -> None:
-            return None
 
-        def get_active_job(self, news_id: str):
-            return active_job
+    async def _submit_and_wait(request: FlexibleTextEnrichmentRequest) -> EnrichmentStoragePayload:
+        assert request.news_id == "render-queued-enrich-1"
+        return payload
 
-    service = IngestionService(repository=FakeRepository())
+    class StubDirectEnrichmentJobService:
+        async def submit_and_wait(
+            self,
+            request: FlexibleTextEnrichmentRequest,
+        ) -> EnrichmentStoragePayload:
+            return await _submit_and_wait(request)
 
     monkeypatch.setattr(enrichment_route_module, "service", service)
+    monkeypatch.setattr(service, "_direct_enrichment_job_service", StubDirectEnrichmentJobService())
+    monkeypatch.setattr(
+        "app.services.enrichment_service.settings",
+        replace(
+            __import__("app.services.enrichment_service", fromlist=["settings"]).settings,
+            use_worker_backed_direct_enrichment=True,
+        ),
+    )
 
     client = TestClient(app)
     response = client.post(
         "/api/v1/articles/enrich",
         json={
-            "news_id": request.news_id,
-            "title": request.title,
-            "link": str(request.link),
-            "ticker": request.ticker,
-            "source": request.source,
+            "news_id": "render-queued-enrich-1",
+            "title": "Queued direct enrich",
+            "link": "https://example.com/articles/render-queued-enrich-1",
+            "ticker": ["AAPL"],
+            "source": "Reuters",
         },
     )
 
-    assert response.status_code == 202
-    assert response.json()["queued"] is False
-    assert response.json()["processing_state"] == "queued"
-    assert response.json()["error_code"] is None
-    assert response.json()["job"]["job_id"] == "render-job-1"
+    assert response.status_code == 200
+    assert response.json()["news_id"] == "render-queued-enrich-1"
+    assert response.json()["status"] == "completed"
 
 
 def test_process_next_endpoint_is_disabled_on_render_web(monkeypatch) -> None:

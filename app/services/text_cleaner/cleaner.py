@@ -7,11 +7,17 @@ from enum import Enum
 
 MINIMUM_WORD_COUNT = 1
 MINIMUM_CHARACTER_COUNT = 10
+ARTICLE_MINIMUM_WORD_COUNT = 20
+ARTICLE_MINIMUM_CHARACTER_COUNT = 120
+SUMMARY_MINIMUM_WORD_COUNT = 8
+SUMMARY_MINIMUM_CHARACTER_COUNT = 40
 
 _INTERNAL_WHITESPACE_PATTERN = re.compile(r"[ \t\u00a0]+")
 _MULTI_NEWLINE_PATTERN = re.compile(r"\n{3,}")
 _SEPARATOR_LINE_PATTERN = re.compile(r"^[\W_]{2,}$")
 _URL_ONLY_LINE_PATTERN = re.compile(r"^https?://\S+$", re.IGNORECASE)
+_SENTENCE_END_PATTERN = re.compile(r"[.!?](?:\s|$)")
+_ALPHA_TOKEN_PATTERN = re.compile(r"[A-Za-z]{3,}")
 _BOILERPLATE_LINE_PATTERNS = [
     re.compile(r"^advertisement$", re.IGNORECASE),
     re.compile(r"^sponsored content$", re.IGNORECASE),
@@ -73,11 +79,19 @@ def clean_article_text(raw_text: str) -> str:
     return text.strip()
 
 
-def validate_article_text(text: str) -> ArticleTextValidationResult:
+def validate_article_text(
+    text: str,
+    *,
+    allow_brief: bool = False,
+) -> ArticleTextValidationResult:
     """Validate whether cleaned article text is usable for downstream enrichment."""
     cleaned = clean_article_text(text)
     character_count = len(cleaned)
     word_count = len(cleaned.split())
+    minimum_word_count = SUMMARY_MINIMUM_WORD_COUNT if allow_brief else ARTICLE_MINIMUM_WORD_COUNT
+    minimum_character_count = (
+        SUMMARY_MINIMUM_CHARACTER_COUNT if allow_brief else ARTICLE_MINIMUM_CHARACTER_COUNT
+    )
 
     if not cleaned:
         return ArticleTextValidationResult(
@@ -88,7 +102,7 @@ def validate_article_text(text: str) -> ArticleTextValidationResult:
             character_count=0,
         )
 
-    if word_count < MINIMUM_WORD_COUNT or character_count < MINIMUM_CHARACTER_COUNT:
+    if word_count < minimum_word_count or character_count < minimum_character_count:
         return ArticleTextValidationResult(
             is_valid=False,
             status=ArticleTextValidationStatus.TOO_SHORT,
@@ -130,6 +144,8 @@ def _is_safe_boilerplate_line(line: str) -> bool:
 def _looks_like_table_header(line: str) -> bool:
     lowered = line.lower()
     compact_line = line.strip()
+    if _looks_like_narrative_line(compact_line):
+        return False
     # Guard against long single-line article bodies that merely mention
     # financial terms such as GAAP, non-GAAP, or "in millions".
     if len(compact_line) > 160:
@@ -147,6 +163,18 @@ def _looks_like_table_header(line: str) -> bool:
     if len(line) > 45 and line.upper() == line and sum(ch.isalpha() for ch in line) >= 25:
         return True
     return False
+
+
+def _looks_like_narrative_line(line: str) -> bool:
+    if not _SENTENCE_END_PATTERN.search(line):
+        return False
+
+    alpha_tokens = _ALPHA_TOKEN_PATTERN.findall(line)
+    if len(alpha_tokens) < 8:
+        return False
+
+    lowercase_like_tokens = [token for token in alpha_tokens if token != token.upper()]
+    return len(lowercase_like_tokens) >= 5
 
 
 def _trim_noise_edges(lines: list[str]) -> list[str]:

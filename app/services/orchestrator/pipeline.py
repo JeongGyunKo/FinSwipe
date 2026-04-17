@@ -320,7 +320,10 @@ class EnrichmentOrchestrator:
         tracker.complete(PipelineStageName.CLEAN, "Article text cleaned successfully.")
 
         tracker.start(PipelineStageName.VALIDATE)
-        validation = validate_article_text(cleaned_text)
+        validation = validate_article_text(
+            cleaned_text,
+            allow_brief=fetch_result.extraction_source == ArticleTextSource.PROVIDED_SUMMARY_TEXT,
+        )
         if not validation.is_valid:
             log_event(
                 logger,

@@ -243,17 +243,60 @@ def _prepare_summary_input(text: str) -> str:
     if not sentences:
         return normalized[: settings.groq_summary_soft_char_limit]
 
-    selected: list[str] = []
+    prepared = _build_balanced_summary_context(
+        sentences,
+        char_limit=settings.groq_summary_soft_char_limit,
+    )
+    return prepared or normalized[: settings.groq_summary_soft_char_limit]
+
+
+def _build_balanced_summary_context(sentences: list[str], *, char_limit: int) -> str:
+    if not sentences:
+        return ""
+
+    selection_order = _build_summary_sentence_selection_order(len(sentences))
+    selected_indices: list[int] = []
     current_length = 0
-    for sentence in sentences:
-        sentence_length = len(sentence) + (2 if selected else 0)
-        if current_length + sentence_length > settings.groq_summary_soft_char_limit:
-            break
-        selected.append(sentence)
+
+    for index in selection_order:
+        if index in selected_indices:
+            continue
+        sentence = sentences[index]
+        sentence_length = len(sentence) + (2 if selected_indices else 0)
+        if current_length + sentence_length > char_limit:
+            continue
+        selected_indices.append(index)
         current_length += sentence_length
 
-    prepared = " ".join(selected).strip()
-    return prepared or normalized[: settings.groq_summary_soft_char_limit]
+    if not selected_indices:
+        return sentences[0][:char_limit]
+
+    selected_indices.sort()
+    return " ".join(sentences[index] for index in selected_indices).strip()
+
+
+def _build_summary_sentence_selection_order(sentence_count: int) -> list[int]:
+    if sentence_count <= 0:
+        return []
+
+    order: list[int] = []
+    seen: set[int] = set()
+
+    def _append(index: int) -> None:
+        if 0 <= index < sentence_count and index not in seen:
+            seen.add(index)
+            order.append(index)
+
+    midpoint = sentence_count // 2
+    max_offset = max(midpoint, sentence_count - midpoint - 1)
+    for offset in range(max_offset + 1):
+        _append(offset)
+        if offset > 0:
+            _append(midpoint - offset)
+        _append(midpoint + offset)
+        _append(sentence_count - 1 - offset)
+
+    return order
 
 
 def _extract_sentences(text: str) -> list[str]:

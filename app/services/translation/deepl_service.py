@@ -4,6 +4,7 @@ import logging
 import re
 from dataclasses import dataclass
 from functools import lru_cache
+from typing import Iterable
 
 from app.core import get_settings
 from app.schemas.enrichment import (
@@ -52,6 +53,12 @@ class _MaskedText:
     replacements: dict[str, str]
 
 
+@dataclass(frozen=True, slots=True)
+class _TranslationTask:
+    key: str
+    text: str
+
+
 def build_localized_content(
     *,
     title: str,
@@ -60,19 +67,21 @@ def build_localized_content(
     sentiment_label: SentimentLabel | None,
     tickers: list[str] | None = None,
 ) -> LocalizedArticleContent:
-    translated_title = _translate_with_fallback(title, tickers=tickers, request_label="translate_title")
+    translations = _translate_localized_payload(
+        title=title,
+        summary_3lines=summary_3lines,
+        xai=xai,
+        tickers=tickers,
+    )
+    translated_title = translations["title"]
     translated_summary = [
         SummaryLine(
             line_number=line.line_number,
-            text=_translate_with_fallback(
-                line.text,
-                tickers=tickers,
-                request_label=f"translate_summary_line_{line.line_number}",
-            ),
+            text=translations[f"summary_{line.line_number}"],
         )
         for line in summary_3lines
     ]
-    translated_xai = _translate_xai_payload(xai, tickers=tickers)
+    translated_xai = _translate_xai_payload(xai, translations=translations)
 
     return LocalizedArticleContent(
         language="ko",
@@ -84,36 +93,18 @@ def build_localized_content(
     )
 
 
-def _translate_xai_payload(
-    payload: XAIPayload | None,
-    *,
-    tickers: list[str] | None,
-) -> XAIPayload | None:
+def _translate_xai_payload(payload: XAIPayload | None, *, translations: dict[str, str]) -> XAIPayload | None:
     if payload is None:
         return None
 
     return XAIPayload(
-        explanation=_translate_with_fallback(
-            payload.explanation,
-            tickers=tickers,
-            request_label="translate_xai_explanation",
-        ),
+        explanation=translations["xai_explanation"],
         highlights=[
             XAIHighlightItem(
-                excerpt=_translate_with_fallback(
-                    item.excerpt,
-                    tickers=tickers,
-                    request_label=f"translate_xai_highlight_{index + 1}",
-                ),
+                excerpt=translations[f"xai_highlight_{index + 1}"],
                 relevance_score=item.relevance_score,
                 explanation=(
-                    _translate_with_fallback(
-                        item.explanation,
-                        tickers=tickers,
-                        request_label=f"translate_xai_detail_{index + 1}",
-                    )
-                    if item.explanation
-                    else None
+                    translations.get(f"xai_detail_{index + 1}") if item.explanation else None
                 ),
                 sentiment_signal=item.sentiment_signal,
                 start_char=item.start_char,
@@ -122,6 +113,105 @@ def _translate_xai_payload(
             for index, item in enumerate(payload.highlights)
         ],
     )
+
+
+def _translate_localized_payload(
+    *,
+    title: str,
+    summary_3lines: list[SummaryLine],
+    xai: XAIPayload | None,
+    tickers: list[str] | None,
+ ) -> dict[str, str]:
+    tasks = _build_translation_tasks(title=title, summary_3lines=summary_3lines, xai=xai)
+    original_values = {task.key: task.text.strip() for task in tasks}
+    if not groq_is_enabled():
+        return original_values
+
+    try:
+        return _translate_tasks(tasks, tickers=tickers)
+    except Exception:
+        logger.exception("Groq translation failed; falling back to source text.")
+        return original_values
+
+
+def _build_translation_tasks(
+    *,
+    title: str,
+    summary_3lines: list[SummaryLine],
+    xai: XAIPayload | None,
+) -> list[_TranslationTask]:
+    tasks: list[_TranslationTask] = [_TranslationTask(key="title", text=title)]
+    tasks.extend(
+        _TranslationTask(key=f"summary_{line.line_number}", text=line.text)
+        for line in summary_3lines
+    )
+    if xai is not None:
+        tasks.append(_TranslationTask(key="xai_explanation", text=xai.explanation))
+        for index, item in enumerate(xai.highlights, start=1):
+            tasks.append(_TranslationTask(key=f"xai_highlight_{index}", text=item.excerpt))
+            if item.explanation:
+                tasks.append(_TranslationTask(key=f"xai_detail_{index}", text=item.explanation))
+    return tasks
+
+
+def _translate_tasks(
+    tasks: list[_TranslationTask],
+    *,
+    tickers: list[str] | None,
+) -> dict[str, str]:
+    prepared_tasks = [
+        _TranslationTask(
+            key=task.key,
+            text=_prepare_translation_input(task.text.strip(), char_limit=get_settings().groq_translation_char_limit),
+        )
+        for task in tasks
+        if task.text.strip()
+    ]
+    if not prepared_tasks:
+        return {}
+
+    batch_payload = _build_translation_batch_payload(prepared_tasks)
+    masked = _mask_text(batch_payload, tickers=tickers)
+    translated = _cached_translation_batch_completion(
+        get_settings().groq_api_base_url,
+        get_settings().groq_translation_model,
+        masked.text,
+        "translate_localized_payload",
+    )
+    unmasked = _unmask_text(translated, masked.replacements)
+    parsed = _parse_translation_batch_output(unmasked, prepared_tasks)
+
+    results: dict[str, str] = {}
+    for task in tasks:
+        original = task.text.strip()
+        if not original:
+            results[task.key] = original
+            continue
+        translated_text = parsed.get(task.key) or original
+        results[task.key] = _polish_korean_financial_text(translated_text)
+    return results
+
+
+def _build_translation_batch_payload(tasks: Iterable[_TranslationTask]) -> str:
+    return "\n".join(f"{task.key}|||{task.text}" for task in tasks)
+
+
+def _parse_translation_batch_output(
+    output: str,
+    tasks: list[_TranslationTask],
+) -> dict[str, str]:
+    parsed: dict[str, str] = {}
+    valid_keys = {task.key for task in tasks}
+    for raw_line in output.splitlines():
+        line = raw_line.strip()
+        if not line or "|||" not in line:
+            continue
+        key, text = line.split("|||", 1)
+        normalized_key = key.strip()
+        normalized_text = text.strip()
+        if normalized_key in valid_keys and normalized_text:
+            parsed[normalized_key] = normalized_text
+    return parsed
 
 
 def _translate_with_fallback(
@@ -133,10 +223,8 @@ def _translate_with_fallback(
     normalized = text.strip()
     if not normalized:
         return normalized
-
     if not groq_is_enabled():
         return normalized
-
     try:
         return _translate_text(normalized, tickers=tickers, request_label=request_label)
     except Exception:
@@ -200,6 +288,35 @@ def _cached_translation_completion(base_url: str, model: str, masked_text: str, 
             "Do not add commentary, quotation marks, bullets, or explanations."
         ),
         user_prompt=masked_text,
+        temperature=0.0,
+        request_label=request_label,
+    )
+
+
+@lru_cache(maxsize=256)
+def _cached_translation_batch_completion(
+    base_url: str,
+    model: str,
+    masked_payload: str,
+    request_label: str,
+) -> str:
+    del base_url
+    return groq_chat_completion(
+        model=model,
+        system_prompt=(
+            "You are a Korean financial news translator. "
+            "Translate each tagged record into natural Korean financial news style. "
+            "Input lines are formatted as KEY|||TEXT. "
+            "Return the same number of lines in the exact same KEY|||TEXT format. "
+            "Do not reorder, merge, drop, or rename any keys. "
+            "Translate only the TEXT portion. "
+            "Use concise declarative 기사체 and avoid literal translation. "
+            "Prefer established financial terminology such as '가이던스', '전년 대비', and '경영진' when appropriate. "
+            "Keep placeholders unchanged. "
+            "Keep numbers, percentages, dates, currencies, ticker symbols, and finance abbreviations exactly as written. "
+            "Do not add commentary, quotation marks, bullets, explanations, or extra lines."
+        ),
+        user_prompt=masked_payload,
         temperature=0.0,
         request_label=request_label,
     )

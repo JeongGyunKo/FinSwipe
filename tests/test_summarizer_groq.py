@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from app.services.summarizer import summarize_to_three_lines
+from app.services.summarizer.summarizer import _prepare_summary_input
 from app.services.summarizer.summarizer import _cached_summary_completion
 
 
@@ -165,3 +166,23 @@ def test_summarizer_skips_groq_for_oversized_articles(monkeypatch) -> None:
 
     assert len(summary) == 3
     assert all(line.strip() for line in summary)
+
+
+def test_prepare_summary_input_samples_front_middle_and_back_sections(monkeypatch) -> None:
+    monkeypatch.setenv("GROQ_SUMMARY_SOFT_CHAR_LIMIT", "220")
+    article_text = " ".join(
+        [
+            "Sentence one discusses the opening market reaction in detail.",
+            "Sentence two covers early analyst commentary around margins.",
+            "Sentence three explains how revenue trends compare with estimates.",
+            "Sentence four shifts to management guidance and cloud demand.",
+            "Sentence five highlights investor concern about costs and capex.",
+            "Sentence six covers the market close and the stock response afterward.",
+        ]
+    )
+
+    prepared = _prepare_summary_input(article_text)
+
+    assert "Sentence one discusses the opening market reaction in detail." in prepared
+    assert "Sentence four shifts to management guidance and cloud demand." in prepared
+    assert "Sentence six covers the market close and the stock response afterward." in prepared

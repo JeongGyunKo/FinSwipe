@@ -1,36 +1,34 @@
 from fastapi import APIRouter
 
-from app.schemas.ingestion import (
-    DirectTextIngestionRequest,
-    IngestionAcceptedResponse,
-    RawNewsIngestionRequest,
+from app.schemas.enrichment import (
+    ArticleEnrichmentResponse,
+    DirectTextEnrichmentRequest,
+    FlexibleTextEnrichmentRequest,
 )
-from app.services.ingestion_service import IngestionService
+from app.services.enrichment_service import EnrichmentService
 
 
 router = APIRouter(tags=["enrichment"])
-service = IngestionService()
+service = EnrichmentService()
 
 
 @router.post(
     "/articles/enrich",
-    response_model=IngestionAcceptedResponse,
-    status_code=202,
-    summary="Submit a financial news article for enrichment",
+    response_model=ArticleEnrichmentResponse,
+    summary="Run enrichment immediately and return the final result",
 )
 async def enrich_article(
-    payload: RawNewsIngestionRequest,
-) -> IngestionAcceptedResponse:
-    return await service.ingest_article(payload)
+    payload: FlexibleTextEnrichmentRequest,
+) -> ArticleEnrichmentResponse:
+    return await service.enrich_article(payload)
 
 
 @router.post(
     "/articles/enrich-text",
-    response_model=IngestionAcceptedResponse,
-    status_code=202,
-    summary="Submit licensed article or summary text for enrichment",
+    response_model=ArticleEnrichmentResponse,
+    summary="Run direct-text enrichment immediately and return the final result",
 )
 async def enrich_article_text(
-    payload: DirectTextIngestionRequest,
-) -> IngestionAcceptedResponse:
-    return await service.ingest_article_text(payload)
+    payload: DirectTextEnrichmentRequest,
+) -> ArticleEnrichmentResponse:
+    return await service.enrich_article_text(payload)
