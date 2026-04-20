@@ -1,5 +1,7 @@
-import { Link } from "react-router-dom";
-import { signInWithGoogle } from '../lib/supabase';
+import { useState } from "react";
+import { Link, useNavigate } from "react-router-dom";
+import { supabase, signInWithGoogle } from '../lib/supabase';
+import { validateEmail } from "../utils/validation";
 //컴포넌트
 import { Input } from "../components/common/input";
 import { Button } from "../components/common/button";
@@ -11,6 +13,41 @@ import PwIcon from "../assets/ic_password.svg";
 import Google from "../assets/ic_google.svg";
 
 export const Login = () => {
+  const navigate = useNavigate();
+
+  const [identifier, setIdentifier] = useState(""); // 이메일 또는 아이디
+  const [password, setPassword] = useState("");
+
+  const handleLogin = async () => {
+    if (!identifier || !password) return alert("이메일/아이디와 비밀번호를 입력해주세요.");
+
+    let email = identifier;
+
+    // 이메일 형식이 아니면 아이디로 간주 → 이메일 조회
+    if (!validateEmail(identifier)) {
+      const { data, error } = await supabase
+        .from('user_profiles')
+        .select('email')
+        .eq('login_id', identifier)
+        .maybeSingle();
+
+      if (error || !data) return alert("존재하지 않는 아이디입니다.");
+      email = data.email;
+    }
+
+    // 이메일로 로그인
+    const { error } = await supabase.auth.signInWithPassword({
+      email,
+      password,
+    });
+
+    if (error) {
+      alert("비밀번호가 올바르지 않습니다.");
+    } else {
+      navigate('/'); // 메인으로 이동
+    }
+  };
+
   
   return (
     <>
@@ -30,21 +67,25 @@ export const Login = () => {
 
         <div className="flex flex-col gap-4">
           <Input 
-            label="이메일"
+            label="이메일/아이디"
             placeholder="example@email.com"
             icon={MailIcon}
+            value={identifier}
+            onChange={(e) => setIdentifier(e.target.value)}
           />
           <Input
             label="비밀번호"
             isPassword
             placeholder="비밀번호 (8자 이상)"
             icon={PwIcon}
+            value={password}
+            onChange={(e) => setPassword(e.target.value)}
           />
           <div className="flex justify-between">
-            <Link to="/FindEmail" className="text-base font-medium text-gray-600">이메일 찾기</Link>
+            <Link to="/FindEmail" className="text-base font-medium text-gray-600">이메일/아이디 찾기</Link>
             <Link to="/FindPassword" className="text-base font-medium text-gray-600">비밀번호 찾기</Link>
           </div>
-          <Button className="mt-10" variant="primary" size="lg">로그인</Button>
+          <Button className="mt-10" variant="primary" size="lg" onClick={handleLogin}>로그인</Button>
           <div className="my-6 flex items-center gap-4">
             <div className="grow h-px bg-gray-200"></div>
             <div className="text-sm text-gray-500">또는</div>
