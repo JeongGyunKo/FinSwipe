@@ -1,40 +1,73 @@
-# FinSwipe_be
+# React + TypeScript + Vite
 
-미국 주식 관련 영문 뉴스 자동 수집 · 감성분석 백엔드
+This template provides a minimal setup to get React working in Vite with HMR and some ESLint rules.
 
-## Stack
+Currently, two official plugins are available:
 
-FastAPI · Supabase · Finlight · APScheduler · Zeabur
+- [@vitejs/plugin-react](https://github.com/vitejs/vite-plugin-react/blob/main/packages/plugin-react) uses [Oxc](https://oxc.rs)
+- [@vitejs/plugin-react-swc](https://github.com/vitejs/vite-plugin-react/blob/main/packages/plugin-react-swc) uses [SWC](https://swc.rs/)
 
-## 파이프라인
+## React Compiler
 
+The React Compiler is not enabled on this template because of its impact on dev & build performances. To add it, see [this documentation](https://react.dev/learn/react-compiler/installation).
+
+## Expanding the ESLint configuration
+
+If you are developing a production application, we recommend updating the configuration to enable type-aware lint rules:
+
+```js
+export default defineConfig([
+  globalIgnores(['dist']),
+  {
+    files: ['**/*.{ts,tsx}'],
+    extends: [
+      // Other configs...
+
+      // Remove tseslint.configs.recommended and replace with this
+      tseslint.configs.recommendedTypeChecked,
+      // Alternatively, use this for stricter rules
+      tseslint.configs.strictTypeChecked,
+      // Optionally, add this for stylistic rules
+      tseslint.configs.stylisticTypeChecked,
+
+      // Other configs...
+    ],
+    languageOptions: {
+      parserOptions: {
+        project: ['./tsconfig.node.json', './tsconfig.app.json'],
+        tsconfigRootDir: import.meta.dirname,
+      },
+      // other options...
+    },
+  },
+])
 ```
-15분마다  Finlight 수집 (7쿼리 × 100개) → Supabase 저장 → GenAI 분석
-30분마다  미분석 기사 재분석
-6시간마다 content/ticker 없는 기사 정리
+
+You can also install [eslint-plugin-react-x](https://github.com/Rel1cx/eslint-react/tree/main/packages/plugins/eslint-plugin-react-x) and [eslint-plugin-react-dom](https://github.com/Rel1cx/eslint-react/tree/main/packages/plugins/eslint-plugin-react-dom) for React-specific lint rules:
+
+```js
+// eslint.config.js
+import reactX from 'eslint-plugin-react-x'
+import reactDom from 'eslint-plugin-react-dom'
+
+export default defineConfig([
+  globalIgnores(['dist']),
+  {
+    files: ['**/*.{ts,tsx}'],
+    extends: [
+      // Other configs...
+      // Enable lint rules for React
+      reactX.configs['recommended-typescript'],
+      // Enable lint rules for React DOM
+      reactDom.configs.recommended,
+    ],
+    languageOptions: {
+      parserOptions: {
+        project: ['./tsconfig.node.json', './tsconfig.app.json'],
+        tsconfigRootDir: import.meta.dirname,
+      },
+      // other options...
+    },
+  },
+])
 ```
-
-## 티커
-
-NYSE + NASDAQ + AMEX 전체 보통주 5,531개 지원  
-한국어 이름 474개, 나머지 영문 회사명 표시
-
-## 로컬 실행
-
-```bash
-cp .env.example .env
-pip install -r requirements.txt
-uvicorn app.main:app --reload
-```
-
-## 환경변수
-
-| 변수 | 설명 |
-|------|------|
-| `SUPABASE_URL` | Supabase 프로젝트 URL |
-| `SUPABASE_SERVICE_KEY` | Supabase service_role 키 |
-| `FINLIGHT_API_KEY` | Finlight API 키 |
-| `GENAI_URL` | GenAI 서버 URL |
-| `GENAI_USER` | GenAI 인증 유저 |
-| `GENAI_PASSWORD` | GenAI 인증 패스워드 |
-| `ADMIN_API_KEY` | 관리용 API 키 (16자 이상) |
