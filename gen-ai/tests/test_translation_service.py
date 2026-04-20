@@ -1,0 +1,173 @@
+from __future__ import annotations
+
+from app.schemas.enrichment import SummaryLine, XAIHighlightItem, XAIPayload
+from app.schemas.enrichment import SentimentLabel
+from app.services.translation.deepl_service import _cached_translation_completion
+from app.services.translation.deepl_service import _cached_translation_batch_completion
+from app.services.translation.deepl_service import _polish_korean_financial_text
+from app.services.translation.deepl_service import build_localized_content
+
+
+def test_build_localized_content_falls_back_without_api_key(monkeypatch) -> None:
+    _cached_translation_completion.cache_clear()
+    _cached_translation_batch_completion.cache_clear()
+    monkeypatch.delenv("GROQ_API_KEY", raising=False)
+
+    localized = build_localized_content(
+        title="Apple raises guidance",
+        summary_3lines=[
+            SummaryLine(line_number=1, text="Revenue grew 12%."),
+            SummaryLine(line_number=2, text="Margins improved."),
+            SummaryLine(line_number=3, text="Guidance was raised."),
+        ],
+        xai=XAIPayload(
+            explanation="Top article snippets influencing the bullish sentiment result.",
+            highlights=[
+                XAIHighlightItem(
+                    excerpt="Guidance was raised.",
+                    relevance_score=0.8,
+                    explanation=None,
+                    sentiment_signal=SentimentLabel.BULLISH,
+                    start_char=0,
+                    end_char=19,
+                )
+            ],
+        ),
+        sentiment_label=SentimentLabel.BULLISH,
+        tickers=["AAPL"],
+    )
+
+    assert localized.language == "ko"
+    assert localized.title == "Apple raises guidance"
+    assert localized.summary_3lines[0].text == "Revenue grew 12%."
+    assert localized.xai is not None
+    assert localized.xai.highlights[0].excerpt == "Guidance was raised."
+    assert localized.sentiment_label == "강세"
+    assert localized.ticker_box_labels["revenue"] == "매출"
+
+
+def test_build_localized_content_uses_groq_when_api_key_present(monkeypatch) -> None:
+    _cached_translation_completion.cache_clear()
+    _cached_translation_batch_completion.cache_clear()
+    monkeypatch.setenv("GROQ_API_KEY", "test-key")
+    monkeypatch.setenv("GROQ_API_BASE_URL", "https://api.groq.com/openai")
+    monkeypatch.setenv("GROQ_TRANSLATION_MODEL", "llama-3.1-8b-instant")
+
+    class _Response:
+        def raise_for_status(self) -> None:
+            return None
+
+        def json(self) -> dict[str, object]:
+            return {
+                "choices": [
+                    {
+                        "message": {
+                            "content": (
+                                "title|||애플이 가이던스를 상향했습니다\n"
+                                "summary_1|||매출은 12% 증가했습니다.\n"
+                                "summary_2|||마진이 개선되었습니다.\n"
+                                "summary_3|||가이던스가 상향되었습니다.\n"
+                                "xai_explanation|||강세 판단에 영향을 준 핵심 문장입니다.\n"
+                                "xai_highlight_1|||가이던스가 상향되었습니다."
+                            )
+                        }
+                    }
+                ]
+            }
+
+    def _fake_post(*args, **kwargs):
+        return _Response()
+
+    monkeypatch.setattr("app.services.groq.client.requests.post", _fake_post)
+
+    localized = build_localized_content(
+        title="Apple raises guidance",
+        summary_3lines=[
+            SummaryLine(line_number=1, text="Revenue grew 12%."),
+            SummaryLine(line_number=2, text="Margins improved."),
+            SummaryLine(line_number=3, text="Guidance was raised."),
+        ],
+        xai=XAIPayload(
+            explanation="Top article snippets influencing the bullish sentiment result.",
+            highlights=[
+                XAIHighlightItem(
+                    excerpt="Guidance was raised.",
+                    relevance_score=0.8,
+                    explanation=None,
+                    sentiment_signal=SentimentLabel.BULLISH,
+                    start_char=0,
+                    end_char=19,
+                )
+            ],
+        ),
+        sentiment_label=SentimentLabel.BULLISH,
+        tickers=["AAPL"],
+    )
+
+    assert localized.title == "애플이 가이던스를 상향했습니다"
+    assert localized.summary_3lines[0].text == "매출은 12% 증가했습니다."
+    assert localized.xai is not None
+    assert localized.xai.explanation == "강세 판단에 영향을 준 핵심 문장입니다."
+    assert localized.xai.highlights[0].excerpt == "가이던스가 상향되었습니다."
+
+
+def test_build_localized_content_reuses_cached_groq_translations(monkeypatch) -> None:
+    _cached_translation_completion.cache_clear()
+    _cached_translation_batch_completion.cache_clear()
+    monkeypatch.setenv("GROQ_API_KEY", "test-key")
+    monkeypatch.setenv("GROQ_API_BASE_URL", "https://api.groq.com/openai/v1")
+    monkeypatch.setenv("GROQ_TRANSLATION_MODEL", "llama-3.1-8b-instant")
+
+    calls = {"count": 0}
+    class _Response:
+        def raise_for_status(self) -> None:
+            return None
+
+        def json(self) -> dict[str, object]:
+            calls["count"] += 1
+            return {
+                "choices": [
+                    {
+                        "message": {
+                            "content": (
+                                "title|||애플이 가이던스를 상향했습니다\n"
+                                "summary_1|||매출은 12% 증가했습니다.\n"
+                                "summary_2|||마진이 개선되었습니다.\n"
+                                "summary_3|||가이던스가 상향되었습니다."
+                            )
+                        }
+                    }
+                ]
+            }
+
+    def _fake_post(*args, **kwargs):
+        return _Response()
+
+    monkeypatch.setattr("app.services.groq.client.requests.post", _fake_post)
+
+    kwargs = dict(
+        title="Apple raises guidance",
+        summary_3lines=[
+            SummaryLine(line_number=1, text="Revenue grew 12%."),
+            SummaryLine(line_number=2, text="Margins improved."),
+            SummaryLine(line_number=3, text="Guidance was raised."),
+        ],
+        xai=None,
+        sentiment_label=SentimentLabel.BULLISH,
+        tickers=["AAPL"],
+    )
+
+    first = build_localized_content(**kwargs)
+    second = build_localized_content(**kwargs)
+
+    assert first.title == second.title
+    assert first.summary_3lines[0].text == second.summary_3lines[0].text
+    assert calls["count"] == 1
+
+
+def test_polish_korean_financial_text_normalizes_literal_finance_phrases() -> None:
+    polished = _polish_korean_financial_text(
+        "매니저들은 올해 전망을 높였다고 합니다. 운영 마진은 향상되었다."
+    )
+
+    assert polished == "경영진은 올해 가이던스를 상향했다고 밝혔다. 운영 마진은 개선됐다."

@@ -1,0 +1,198 @@
+from __future__ import annotations
+
+import re
+from dataclasses import dataclass
+from enum import Enum
+
+
+MINIMUM_WORD_COUNT = 1
+MINIMUM_CHARACTER_COUNT = 10
+ARTICLE_MINIMUM_WORD_COUNT = 20
+ARTICLE_MINIMUM_CHARACTER_COUNT = 120
+SUMMARY_MINIMUM_WORD_COUNT = 8
+SUMMARY_MINIMUM_CHARACTER_COUNT = 40
+
+_INTERNAL_WHITESPACE_PATTERN = re.compile(r"[ \t\u00a0]+")
+_MULTI_NEWLINE_PATTERN = re.compile(r"\n{3,}")
+_SEPARATOR_LINE_PATTERN = re.compile(r"^[\W_]{2,}$")
+_URL_ONLY_LINE_PATTERN = re.compile(r"^https?://\S+$", re.IGNORECASE)
+_SENTENCE_END_PATTERN = re.compile(r"[.!?](?:\s|$)")
+_ALPHA_TOKEN_PATTERN = re.compile(r"[A-Za-z]{3,}")
+_BOILERPLATE_LINE_PATTERNS = [
+    re.compile(r"^advertisement$", re.IGNORECASE),
+    re.compile(r"^sponsored content$", re.IGNORECASE),
+    re.compile(r"^read more$", re.IGNORECASE),
+    re.compile(r"^click here$", re.IGNORECASE),
+    re.compile(r"^follow us on .+$", re.IGNORECASE),
+    re.compile(r"^sign up for (?:our )?newsletter$", re.IGNORECASE),
+    re.compile(r"^subscribe(?: now)?$", re.IGNORECASE),
+    re.compile(r"^(?:privacy policy|cookie policy|terms of service)$", re.IGNORECASE),
+    re.compile(r"^all rights reserved\.?$", re.IGNORECASE),
+    re.compile(r"^condensed consolidated statements? of .+$", re.IGNORECASE),
+    re.compile(r"^reconciliation of gaap to non-gaap .+$", re.IGNORECASE),
+    re.compile(r"^\(?in millions(?:, except per share data)?\)?$", re.IGNORECASE),
+    re.compile(r"^\(?unaudited\)?$", re.IGNORECASE),
+    re.compile(r"^table of contents$", re.IGNORECASE),
+]
+_DATELINE_PREFIX_PATTERN = re.compile(
+    r"^[A-Z][A-Z .'-]{1,30},\s+[A-Z][a-z]{2,9}\.?\s+\d{1,2}\s*(?:\([^)]*\))?\s*[-:]\s*"
+)
+
+
+class ArticleTextValidationStatus(str, Enum):
+    VALID = "valid"
+    TOO_SHORT = "too_short"
+    UNUSABLE = "unusable"
+
+
+@dataclass(frozen=True, slots=True)
+class ArticleTextValidationResult:
+    """Validation result for cleaned article text."""
+
+    is_valid: bool
+    status: ArticleTextValidationStatus
+    reason: str | None = None
+    word_count: int = 0
+    character_count: int = 0
+
+
+def clean_article_text(raw_text: str) -> str:
+    """Clean article text conservatively without removing likely financial content."""
+    if not raw_text:
+        return ""
+
+    text = raw_text.replace("\r\n", "\n").replace("\r", "\n").replace("\u000c", "\n")
+    lines = text.split("\n")
+
+    cleaned_lines: list[str] = []
+    for line in lines:
+        normalized_line = _normalize_line_whitespace(line)
+        if not normalized_line:
+            continue
+        if _is_safe_boilerplate_line(normalized_line):
+            continue
+        cleaned_lines.append(normalized_line)
+
+    cleaned_lines = _trim_noise_edges(cleaned_lines)
+    text = "\n".join(cleaned_lines)
+    text = _MULTI_NEWLINE_PATTERN.sub("\n\n", text)
+    return text.strip()
+
+
+def validate_article_text(
+    text: str,
+    *,
+    allow_brief: bool = False,
+) -> ArticleTextValidationResult:
+    """Validate whether cleaned article text is usable for downstream enrichment."""
+    cleaned = clean_article_text(text)
+    character_count = len(cleaned)
+    word_count = len(cleaned.split())
+    minimum_word_count = SUMMARY_MINIMUM_WORD_COUNT if allow_brief else ARTICLE_MINIMUM_WORD_COUNT
+    minimum_character_count = (
+        SUMMARY_MINIMUM_CHARACTER_COUNT if allow_brief else ARTICLE_MINIMUM_CHARACTER_COUNT
+    )
+
+    if not cleaned:
+        return ArticleTextValidationResult(
+            is_valid=False,
+            status=ArticleTextValidationStatus.UNUSABLE,
+            reason="No usable article text after cleaning.",
+            word_count=0,
+            character_count=0,
+        )
+
+    if word_count < minimum_word_count or character_count < minimum_character_count:
+        return ArticleTextValidationResult(
+            is_valid=False,
+            status=ArticleTextValidationStatus.TOO_SHORT,
+            reason="Article text is too short for reliable downstream analysis.",
+            word_count=word_count,
+            character_count=character_count,
+        )
+
+    return ArticleTextValidationResult(
+        is_valid=True,
+        status=ArticleTextValidationStatus.VALID,
+        reason=None,
+        word_count=word_count,
+        character_count=character_count,
+    )
+
+
+def is_article_text_usable(text: str) -> bool:
+    """Return a simple boolean signal for downstream pipeline checks."""
+    return validate_article_text(text).is_valid
+
+
+def _normalize_line_whitespace(line: str) -> str:
+    normalized = _INTERNAL_WHITESPACE_PATTERN.sub(" ", line.strip())
+    normalized = _DATELINE_PREFIX_PATTERN.sub("", normalized)
+    return normalized
+
+
+def _is_safe_boilerplate_line(line: str) -> bool:
+    if _SEPARATOR_LINE_PATTERN.match(line):
+        return True
+    if _URL_ONLY_LINE_PATTERN.match(line):
+        return True
+    if _looks_like_table_header(line):
+        return True
+    return any(pattern.match(line) for pattern in _BOILERPLATE_LINE_PATTERNS)
+
+
+def _looks_like_table_header(line: str) -> bool:
+    lowered = line.lower()
+    compact_line = line.strip()
+    if _looks_like_narrative_line(compact_line):
+        return False
+    # Guard against long single-line article bodies that merely mention
+    # financial terms such as GAAP, non-GAAP, or "in millions".
+    if len(compact_line) > 160:
+        return len(compact_line) > 45 and compact_line.upper() == compact_line and sum(
+            ch.isalpha() for ch in compact_line
+        ) >= 25
+    if "gaap" in lowered and "non-gaap" in lowered:
+        return True
+    if "condensed consolidated" in lowered:
+        return True
+    if "statements of income" in lowered or "balance sheets" in lowered:
+        return True
+    if "except per share data" in lowered or "in millions" in lowered:
+        return True
+    if len(line) > 45 and line.upper() == line and sum(ch.isalpha() for ch in line) >= 25:
+        return True
+    return False
+
+
+def _looks_like_narrative_line(line: str) -> bool:
+    if not _SENTENCE_END_PATTERN.search(line):
+        return False
+
+    alpha_tokens = _ALPHA_TOKEN_PATTERN.findall(line)
+    if len(alpha_tokens) < 8:
+        return False
+
+    lowercase_like_tokens = [token for token in alpha_tokens if token != token.upper()]
+    return len(lowercase_like_tokens) >= 5
+
+
+def _trim_noise_edges(lines: list[str]) -> list[str]:
+    start = 0
+    end = len(lines)
+
+    while start < end and _is_edge_noise_line(lines[start]):
+        start += 1
+
+    while end > start and _is_edge_noise_line(lines[end - 1]):
+        end -= 1
+
+    return lines[start:end]
+
+
+def _is_edge_noise_line(line: str) -> bool:
+    if _is_safe_boilerplate_line(line):
+        return True
+    if len(line) <= 2 and not any(character.isalnum() for character in line):
+        return True
+    return False
