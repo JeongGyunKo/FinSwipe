@@ -1,45 +1,103 @@
-from pydantic import field_validator
-from pydantic_settings import BaseSettings
+from __future__ import annotations
+
+import os
+from dataclasses import dataclass
 
 
-class Settings(BaseSettings):
-    supabase_url: str
-    supabase_service_key: str
-
-    finlight_api_key: str
-
-    genai_url: str
-    genai_user: str
-    genai_password: str
-
-    admin_api_key: str
-
-    cors_origins: list[str] = ["*"]
-    log_level: str = "INFO"
-
-    class Config:
-        env_file = ".env"
-
-    @field_validator("supabase_url", "genai_url")
-    @classmethod
-    def must_be_https(cls, v: str) -> str:
-        if not v.startswith("https://"):
-            raise ValueError("URL must start with https://")
-        return v.rstrip("/")
-
-    @field_validator("admin_api_key")
-    @classmethod
-    def must_be_strong(cls, v: str) -> str:
-        if len(v) < 16:
-            raise ValueError("ADMIN_API_KEY must be at least 16 characters")
-        return v
-
-    @field_validator("finlight_api_key", "genai_user", "genai_password")
-    @classmethod
-    def must_not_be_empty(cls, v: str) -> str:
-        if not v.strip():
-            raise ValueError("Required field must not be empty")
-        return v
+def _env_flag(name: str, *, default: bool = False) -> bool:
+    value = os.getenv(name)
+    if value is None:
+        return default
+    return value.strip().lower() in {"1", "true", "yes", "on"}
 
 
-settings = Settings()
+@dataclass(frozen=True, slots=True)
+class AppSettings:
+    database_backend: str
+    postgres_dsn: str | None
+    sqlite_path: str | None
+    app_host: str
+    app_port: int
+    worker_poll_interval_seconds: float
+    enable_job_process_api: bool
+    use_worker_backed_direct_enrichment: bool
+    enable_inline_xai: bool
+    xai_backend: str
+    direct_enrichment_wait_timeout_seconds: float
+    direct_enrichment_poll_interval_seconds: float
+    basic_auth_user: str | None
+    basic_auth_password: str | None
+    deepl_api_key: str | None
+    deepl_api_base_url: str
+    deepl_target_lang: str
+    deepl_timeout_seconds: float
+    groq_api_key: str | None
+    groq_api_base_url: str
+    groq_summary_model: str
+    groq_translation_model: str
+    groq_timeout_seconds: float
+    groq_summary_soft_char_limit: int
+    groq_summary_hard_char_limit: int
+    groq_translation_char_limit: int
+
+    @property
+    def basic_auth_enabled(self) -> bool:
+        return bool(self.basic_auth_user and self.basic_auth_password)
+
+
+def get_settings() -> AppSettings:
+    """Load application settings from environment variables."""
+    running_on_render = _env_flag("RENDER", default=False)
+    return AppSettings(
+        database_backend=(
+            os.getenv("GENAI_DATABASE_BACKEND")
+            or os.getenv("DATABASE_BACKEND")
+            or "sqlite"
+        ).lower(),
+        postgres_dsn=os.getenv("GENAI_POSTGRES_DSN") or os.getenv("DATABASE_URL"),
+        sqlite_path=os.getenv("GENAI_SQLITE_DB_PATH"),
+        app_host=os.getenv("GENAI_APP_HOST", "127.0.0.1"),
+        app_port=int(os.getenv("GENAI_APP_PORT", "8000")),
+        worker_poll_interval_seconds=float(os.getenv("GENAI_WORKER_POLL_INTERVAL", "5")),
+        enable_job_process_api=_env_flag(
+            "GENAI_ENABLE_JOB_PROCESS_API",
+            default=not running_on_render,
+        ),
+        use_worker_backed_direct_enrichment=_env_flag(
+            "GENAI_USE_WORKER_FOR_DIRECT_ENRICHMENT",
+            default=running_on_render,
+        ),
+        enable_inline_xai=_env_flag(
+            "GENAI_ENABLE_INLINE_XAI",
+            default=False,
+        ),
+        xai_backend=(os.getenv("GENAI_XAI_BACKEND") or "attention").strip().lower(),
+        direct_enrichment_wait_timeout_seconds=float(
+            os.getenv("GENAI_DIRECT_ENRICHMENT_WAIT_TIMEOUT", "30")
+        ),
+        direct_enrichment_poll_interval_seconds=float(
+            os.getenv("GENAI_DIRECT_ENRICHMENT_POLL_INTERVAL", "0.5")
+        ),
+        basic_auth_user=os.getenv("BASIC_AUTH_USER"),
+        basic_auth_password=os.getenv("BASIC_AUTH_PASSWORD"),
+        deepl_api_key=os.getenv("DEEPL_API_KEY"),
+        deepl_api_base_url=(
+            os.getenv("DEEPL_API_BASE_URL") or "https://api-free.deepl.com"
+        ).rstrip("/"),
+        deepl_target_lang=(os.getenv("DEEPL_TARGET_LANG") or "KO").strip().upper(),
+        deepl_timeout_seconds=float(os.getenv("DEEPL_TIMEOUT_SECONDS", "8")),
+        groq_api_key=os.getenv("GROQ_API_KEY"),
+        groq_api_base_url=(
+            os.getenv("GROQ_API_BASE_URL") or "https://api.groq.com/openai"
+        ).rstrip("/"),
+        groq_summary_model=(
+            os.getenv("GROQ_SUMMARY_MODEL") or "llama-3.1-8b-instant"
+        ).strip(),
+        groq_translation_model=(
+            os.getenv("GROQ_TRANSLATION_MODEL") or "llama-3.1-8b-instant"
+        ).strip(),
+        groq_timeout_seconds=float(os.getenv("GROQ_TIMEOUT_SECONDS", "20")),
+        groq_summary_soft_char_limit=int(os.getenv("GROQ_SUMMARY_SOFT_CHAR_LIMIT", "3500")),
+        groq_summary_hard_char_limit=int(os.getenv("GROQ_SUMMARY_HARD_CHAR_LIMIT", "6500")),
+        groq_translation_char_limit=int(os.getenv("GROQ_TRANSLATION_CHAR_LIMIT", "1200")),
+    )
