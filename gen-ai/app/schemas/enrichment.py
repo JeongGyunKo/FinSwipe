@@ -150,12 +150,27 @@ class FlexibleTextEnrichmentRequest(ArticleEnrichmentRequest):
     article_text: str | None = Field(
         default=None,
         min_length=1,
+        validation_alias=AliasChoices(
+            "article_text",
+            "articleBody",
+            "article_body",
+            "body",
+            "content",
+            "full_text",
+            "raw_text",
+        ),
         description="Licensed full article text supplied directly by the upstream provider.",
     )
     summary_text: str | None = Field(
         default=None,
         min_length=1,
-        validation_alias=AliasChoices("summary_text", "text"),
+        validation_alias=AliasChoices(
+            "summary_text",
+            "summary",
+            "snippet",
+            "description",
+            "text",
+        ),
         description="Licensed summary/snippet text supplied directly by the upstream provider.",
     )
 
@@ -258,6 +273,36 @@ class XAIPayload(SchemaModel):
     )
 
 
+class XAIDisplayKeywordSpan(SchemaModel):
+    text: str = Field(
+        ...,
+        min_length=1,
+        description="Keyword or short phrase to emphasize inside the evidence sentence.",
+    )
+    start_char: int | None = Field(
+        default=None,
+        ge=0,
+        description="0-based start offset inside the evidence sentence.",
+    )
+    end_char: int | None = Field(
+        default=None,
+        ge=0,
+        description="0-based exclusive end offset inside the evidence sentence.",
+    )
+    importance_score: float | None = Field(
+        default=None,
+        ge=0.0,
+        description="Relative importance score for this keyword span.",
+    )
+
+    @model_validator(mode="after")
+    def validate_offsets(self) -> XAIDisplayKeywordSpan:
+        if self.start_char is not None and self.end_char is not None:
+            if self.end_char < self.start_char:
+                raise ValueError("end_char must be greater than or equal to start_char")
+        return self
+
+
 class XAIDisplayEvidenceItem(SchemaModel):
     excerpt: str = Field(
         ...,
@@ -267,6 +312,10 @@ class XAIDisplayEvidenceItem(SchemaModel):
     keywords: list[str] = Field(
         default_factory=list,
         description="Important keyword or phrase snippets inside the evidence sentence.",
+    )
+    keyword_spans: list[XAIDisplayKeywordSpan] = Field(
+        default_factory=list,
+        description="Frontend-ready keyword spans relative to the evidence sentence.",
     )
     sentiment_signal: SentimentLabel | None = Field(
         default=None,
@@ -290,6 +339,10 @@ class XAIDisplayPayload(SchemaModel):
 class LocalizedArticleContent(SchemaModel):
     language: str = Field(..., min_length=2, description="Localized display language.")
     title: str = Field(..., min_length=1, description="Localized article title.")
+    content: str | None = Field(
+        default=None,
+        description="Localized article body excerpt for display when available.",
+    )
     summary_3lines: list[SummaryLine] = Field(
         default_factory=list,
         max_length=3,
@@ -347,6 +400,55 @@ class InternalStageStatus(SchemaModel):
     )
 
 
+class StageIOMetric(SchemaModel):
+    stage: StageName = Field(..., description="Pipeline stage name.")
+    input_chars: int | None = Field(
+        default=None,
+        ge=0,
+        description="Approximate input character count consumed by the stage.",
+    )
+    output_chars: int | None = Field(
+        default=None,
+        ge=0,
+        description="Approximate output character count produced by the stage.",
+    )
+    output_items: int | None = Field(
+        default=None,
+        ge=0,
+        description="Optional item count output (for example summary lines or highlights).",
+    )
+    note: str | None = Field(
+        default=None,
+        description="Optional stage-specific diagnostic note.",
+    )
+
+
+class AlertMode(str, Enum):
+    ALL = "all"
+    SENTIMENT_ONLY = "sentiment_only"
+
+
+class AlertDecision(SchemaModel):
+    should_send: bool = Field(
+        ...,
+        description="Whether this article should trigger downstream alert delivery.",
+    )
+    mode: AlertMode = Field(
+        ...,
+        description="Applied alert policy mode.",
+    )
+    reason_code: str = Field(
+        ...,
+        min_length=1,
+        description="Stable machine-readable decision reason.",
+    )
+    reason: str = Field(
+        ...,
+        min_length=1,
+        description="Human-readable explanation of the alert decision.",
+    )
+
+
 class ArticleEnrichmentResponse(SchemaModel):
     news_id: str = Field(..., description="Unique news identifier.")
     title: str = Field(..., description="Original article title.")
@@ -372,6 +474,23 @@ class ArticleEnrichmentResponse(SchemaModel):
         default=None,
         description="Localized display payload for UI consumers.",
     )
+    headline_ko: str | None = Field(
+        default=None,
+        description="Compatibility field for localized.title.",
+    )
+    content_ko: str | None = Field(
+        default=None,
+        description="Compatibility field for localized.content display excerpt.",
+    )
+    summary_3lines_ko: list[str] = Field(
+        default_factory=list,
+        max_length=3,
+        description="Compatibility field for localized.summary_3lines text values.",
+    )
+    xai_ko: XAIPayload | None = Field(
+        default=None,
+        description="Compatibility field for localized.xai.",
+    )
     mixed_flags: MixedConflictPayload | None = Field(
         default=None,
         description="Mixed/conflict analysis output.",
@@ -381,9 +500,29 @@ class ArticleEnrichmentResponse(SchemaModel):
         ...,
         description="Top-level outcome separating success, partial success, and fatal failure.",
     )
+    pipeline_trace_id: str | None = Field(
+        default=None,
+        description="Correlation id shared across pipeline stage logs.",
+    )
+    failure_code: str | None = Field(
+        default=None,
+        description=(
+            "Stable machine-readable failure code for quick diagnosis. "
+            "Can be populated for partial failures as well."
+        ),
+    )
     analyzed_at: datetime = Field(
         default_factory=lambda: datetime.now(timezone.utc),
         description="When analysis was completed or last updated.",
+    )
+    cleaned_text_char_count: int = Field(
+        default=0,
+        ge=0,
+        description="Character count of cleaned article text.",
+    )
+    cleaned_text_preview: str | None = Field(
+        default=None,
+        description="Trimmed preview of cleaned article text for debugging.",
     )
     error: ErrorDetail | None = Field(
         default=None,
@@ -392,6 +531,20 @@ class ArticleEnrichmentResponse(SchemaModel):
     stage_statuses: list[InternalStageStatus] = Field(
         default_factory=list,
         description="Optional internal execution status per pipeline stage.",
+    )
+    stage_io_metrics: list[StageIOMetric] = Field(
+        default_factory=list,
+        description="Per-stage input/output volume diagnostics.",
+    )
+    alert_decision: AlertDecision | None = Field(
+        default=None,
+        description="Alert policy decision derived from sentiment and runtime settings.",
+    )
+    news_power_score: float | None = Field(
+        default=None,
+        ge=0.0,
+        le=1.0,
+        description="Ranking score for surfacing stronger sentiment news first.",
     )
 
     @field_validator("summary_3lines", mode="before")

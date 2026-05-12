@@ -1,7 +1,7 @@
 import { supabase } from "../lib/supabase";
-import type { TickerInfo, TickerNameInfo } from "../types/tickers";
+import type { TickerNameInfo } from "../types/tickers";
 
-export const getUniqueTickersFromNews = async (): Promise<TickerInfo[]> => {
+export const getUniqueTickersFromNews = async (): Promise<{ symbol: string; name: string; categories: string[] }[]> => {
   //1. 모든 뉴스에서 tickers, categorys 컬럼 가져오기
   const { data, error } = await supabase
     .from('news_articles')
@@ -33,8 +33,30 @@ export const getTickerNames = async (): Promise<TickerNameInfo[]> => {
   if (error || !data) return [];
 
   return data.map((row) => ({
-    symbol: row.ticker,
-    name: row.ko,
+    ticker: row.ticker,
+    ko: row.ko,
+    corp: row.corp,
+  }));
+};
+
+// 검색
+export const searchTickerNames = async (term: string): Promise<TickerNameInfo[]> => {
+  const query = supabase
+    .from('ticker_names')
+    .select('ticker, corp, ko')
+    .order('ticker', { ascending: true })
+    .limit(100);
+
+  if (term) {
+    query.or(`ticker.ilike.%${term}%,ko.ilike.%${term}%`);
+  }
+
+  const { data, error } = await query;
+  if (error || !data) return [];
+
+  return data.map((row) => ({
+    ticker: row.ticker,
+    ko: row.ko,
     corp: row.corp,
   }));
 };

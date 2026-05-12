@@ -4,6 +4,7 @@ import showPw from "../../assets/ic_showpw.svg";
 import hidePw from "../../assets/ic_hidepw.svg";
 
 interface InputProps extends React.InputHTMLAttributes<HTMLInputElement> {
+  onKeyDown?: (e: React.KeyboardEvent<HTMLInputElement>) => void;
   label?: string;
   icon?: string; // 왼쪽 아이콘 (이미지 경로)
   isPassword?: boolean; // 비밀번호 여부

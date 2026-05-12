@@ -1,5 +1,6 @@
 import asyncio
 import logging
+from datetime import date
 import httpx
 from app.core.config import settings
 
@@ -18,7 +19,7 @@ async def init_client() -> None:
     _client = httpx.AsyncClient(
         base_url=settings.genai_url,
         auth=(settings.genai_user, settings.genai_password),
-        timeout=httpx.Timeout(connect=10.0, read=120.0, write=10.0, pool=5.0),
+        timeout=httpx.Timeout(connect=10.0, read=300.0, write=10.0, pool=5.0),
         limits=httpx.Limits(max_connections=10, max_keepalive_connections=5),
     )
 
@@ -105,6 +106,12 @@ def _parse_direct_response(data: dict) -> dict:
     xai = data.get("xai") or None
 
     localized = data.get("localized") or {}
+    logger.info(
+        f"[파싱] localized 필드: title={'있음' if localized.get('title') else '없음'} "
+        f"summary_3lines_count={len(localized.get('summary_3lines') or [])} "
+        f"xai={'있음' if localized.get('xai') else '없음'} "
+        f"localized_keys={list(localized.keys())}"
+    )
     raw_summary_ko = localized.get("summary_3lines") or []
     summary_3lines_ko = []
     for s in raw_summary_ko:
@@ -112,6 +119,9 @@ def _parse_direct_response(data: dict) -> dict:
             summary_3lines_ko.append(s)
         elif isinstance(s, dict):
             summary_3lines_ko.append(s.get("text") or s.get("line") or s.get("content") or "")
+
+    # GenAI 서버가 localized 필드 없이 summary_3lines에 한국어를 직접 반환하는 경우 fallback
+    resolved_summary_ko = summary_3lines_ko or summary_3lines or None
 
     return {
         "status": data.get("status"),
@@ -122,7 +132,7 @@ def _parse_direct_response(data: dict) -> dict:
         "xai": xai,
         "error": data.get("error"),
         "headline_ko": localized.get("title") or None,
-        "summary_3lines_ko": summary_3lines_ko or None,
+        "summary_3lines_ko": resolved_summary_ko,
         "xai_ko": localized.get("xai") or None,
     }
 
@@ -138,7 +148,7 @@ def _unavailable(reason: str) -> dict:
     }
 
 
-_SUBMIT_SEMAPHORE = asyncio.Semaphore(2)
+_SUBMIT_SEMAPHORE = asyncio.Semaphore(1)
 
 
 async def analyze_news_batch(articles: list[dict]) -> list[dict]:
@@ -151,6 +161,7 @@ async def analyze_news_batch(articles: list[dict]) -> list[dict]:
     async def _enrich_one(a: dict) -> tuple[str, dict]:
         link = (a.get("link") or a.get("source_url") or "").rstrip("/")
         async with _SUBMIT_SEMAPHORE:
+            await asyncio.sleep(3)
             try:
                 article_text = (a.get("content") or "").strip() or None
                 if not article_text:
@@ -158,12 +169,16 @@ async def analyze_news_batch(articles: list[dict]) -> list[dict]:
                     return (link, _unavailable("원문 없음"))
 
                 tickers = a.get("tickers") or None
+                summary_text = (a.get("summary") or "").strip() or None
+                cache_buster = f"?d={date.today().isoformat()}"
                 payload: dict = {
-                    "news_id": link,
+                    "news_id": f"{link}{cache_buster}",
                     "title": a.get("title") or a.get("headline") or "",
-                    "link": link,
+                    "link": f"{link}{cache_buster}",
                     "article_text": article_text,
                 }
+                if summary_text:
+                    payload["summary_text"] = summary_text
                 if tickers:
                     payload["ticker"] = tickers
 
@@ -191,7 +206,7 @@ async def analyze_news_batch(articles: list[dict]) -> list[dict]:
                 return (link, parsed)
 
             except Exception as e:
-                logger.error(f"[GenAI] enrich-text 오류: {link[:60]} | {e}")
+                logger.error(f"[GenAI] enrich-text 오류: {link[:60]} | {type(e).__name__}: {e!r}")
                 return (link, _unavailable(str(e)))
 
     logger.info(f"[GenAI] enrichment 시작 → {len(valid)}개 (최대 5개 동시)")

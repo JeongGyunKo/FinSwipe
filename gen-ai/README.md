@@ -241,12 +241,13 @@ scripts/supabase_lockdown_genai_tables.sql
   - 직접 분석 API를 worker-backed 방식으로 처리할지 여부
 - `GENAI_DIRECT_ENRICHMENT_WAIT_TIMEOUT`
   - 직접 분석 요청 대기 timeout
-- `DEEPL_API_KEY`
-  - 설정 시 제목, 3줄 요약, XAI 하이라이트의 UI용 한글 번역을 활성화
-- `DEEPL_API_BASE_URL`
-  - DeepL Free는 `https://api-free.deepl.com`
-- `DEEPL_TARGET_LANG`
-  - 기본값 `KO`
+- `GEMINI_API_KEY` (또는 `GOOGLE_API_KEY`)
+  - 제목, 3줄 요약, XAI 하이라이트의 UI용 한글 생성/번역에 사용
+- `GEMINI_API_BASE_URL`
+  - 기본값 `https://generativelanguage.googleapis.com/v1beta`
+- `GENAI_FAIL_ON_SUSPICIOUS_GPU_RUNTIME`
+  - 기본값 `false`
+  - CPU 서비스에서 GPU 패키지 흔적(`nvidia-*`, `triton`, torch CUDA build)이 감지되면 웹/워커 시작을 차단
 - `GENAI_DIRECT_ENRICHMENT_POLL_INTERVAL`
   - 직접 분석 요청 대기 polling 간격
 - `BASIC_AUTH_USER`
@@ -282,7 +283,13 @@ DB 연결 여부까지 포함한 상세 점검 엔드포인트입니다.
   "status": "ok",
   "database_backend": "postgres",
   "database_ok": true,
-  "database_error": null
+  "database_error": null,
+  "guard_fail_on_suspicious_gpu_runtime": true,
+  "runtime_torch_installed": true,
+  "runtime_torch_cuda_version": null,
+  "runtime_torch_cuda_available": false,
+  "runtime_gpu_packages_detected": "",
+  "runtime_suspicious_gpu_runtime": false
 }
 ```
 

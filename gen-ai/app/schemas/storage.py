@@ -6,7 +6,7 @@ from enum import Enum
 from pydantic import Field, HttpUrl
 
 from app.schemas.article_fetch import ArticleFetchResult
-from app.schemas.enrichment import SchemaModel
+from app.schemas.enrichment import LocalizedArticleContent, SchemaModel
 from app.schemas.mixed import (
     ArticleMixedDetectionResult,
     TickerMixedDetectionResult,
@@ -80,6 +80,29 @@ class PipelineStageResult(SchemaModel):
     )
 
 
+class StageIOMetric(SchemaModel):
+    stage: PipelineStageName = Field(..., description="Pipeline stage identifier.")
+    input_chars: int | None = Field(
+        default=None,
+        ge=0,
+        description="Approximate input character count consumed by the stage.",
+    )
+    output_chars: int | None = Field(
+        default=None,
+        ge=0,
+        description="Approximate output character count produced by the stage.",
+    )
+    output_items: int | None = Field(
+        default=None,
+        ge=0,
+        description="Optional item count output (for example summary lines or highlights).",
+    )
+    note: str | None = Field(
+        default=None,
+        description="Optional stage-specific diagnostic note.",
+    )
+
+
 class StoredSentimentPayload(SchemaModel):
     label: str = Field(..., description="Final sentiment label stored for the article.")
     score: float = Field(..., ge=-100.0, le=100.0)
@@ -112,6 +135,10 @@ class EnrichmentStoragePayload(SchemaModel):
         default=None,
         description="Stored explainability payload.",
     )
+    localized: LocalizedArticleContent | None = Field(
+        default=None,
+        description="Stored localized display payload to avoid repeated translation calls.",
+    )
     article_mixed: ArticleMixedDetectionResult | None = Field(
         default=None,
         description="Article-level mixed/conflict detection result.",
@@ -128,9 +155,29 @@ class EnrichmentStoragePayload(SchemaModel):
         default=AnalysisOutcome.PARTIAL_SUCCESS,
         description="Top-level outcome separating success, partial success, and fatal failure.",
     )
+    pipeline_trace_id: str | None = Field(
+        default=None,
+        description="Correlation id shared across clean/sentiment/xai/summary/translation logs.",
+    )
+    failure_code: str | None = Field(
+        default=None,
+        description=(
+            "Stable machine-readable failure code for quick diagnosis. "
+            "Can be populated for partial failures as well."
+        ),
+    )
     analyzed_at: datetime = Field(
         default_factory=lambda: datetime.now(timezone.utc),
         description="Timestamp when this storage payload was assembled.",
+    )
+    cleaned_text_char_count: int = Field(
+        default=0,
+        ge=0,
+        description="Character count of cleaned article text.",
+    )
+    cleaned_text_preview: str | None = Field(
+        default=None,
+        description="Trimmed preview of cleaned article text for debugging.",
     )
     cleaned_text_available: bool = Field(
         default=False,
@@ -143,6 +190,10 @@ class EnrichmentStoragePayload(SchemaModel):
     stage_statuses: list[PipelineStageResult] = Field(
         default_factory=list,
         description="Per-stage execution details for debugging and observability.",
+    )
+    stage_io_metrics: list[StageIOMetric] = Field(
+        default_factory=list,
+        description="Per-stage input/output volume diagnostics.",
     )
     errors: list[StoragePayloadError] = Field(
         default_factory=list,

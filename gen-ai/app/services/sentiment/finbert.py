@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import os
 import threading
 from dataclasses import dataclass
 from typing import Final
@@ -7,6 +8,7 @@ from typing import Final
 import torch
 from transformers import AutoModelForSequenceClassification, AutoTokenizer
 
+from app.core import get_settings
 from app.schemas.sentiment import (
     AggregationStrategy,
     FinBERTSentimentLabel,
@@ -23,6 +25,10 @@ from app.services.text_cleaner import clean_article_text
 
 
 MODEL_NAME: Final[str] = "ProsusAI/finbert"
+MODEL_REVISION: Final[str] = os.getenv(
+    "GENAI_FINBERT_MODEL_REVISION",
+    "4556d13015211d73dccd3fdd39d39232506f3e43",
+)
 MAX_TOKENS_PER_CHUNK: Final[int] = 448
 OVERLAP_SENTENCES: Final[int] = 1
 DEFAULT_MAX_CHUNKS: Final[int] = 8
@@ -56,6 +62,7 @@ def analyze_sentiment(
     aggregation_strategy: AggregationStrategy = AggregationStrategy.WEIGHTED_MEAN,
 ) -> SentimentResult:
     """Run FinBERT sentiment analysis on title-aware article text."""
+    settings = get_settings()
     cleaned_text = clean_article_text(article_text)
     if not cleaned_text:
         return SentimentResult(
@@ -80,10 +87,14 @@ def analyze_sentiment(
         tokenizer=tokenizer,
         model=model,
         max_chunk_tokens=max_chunk_tokens,
+        positive_score_threshold=settings.sentiment_positive_score_threshold,
+        negative_score_threshold=settings.sentiment_negative_score_threshold,
     )
     return aggregate_chunk_results(
         chunk_results,
         strategy=aggregation_strategy,
+        positive_score_threshold=settings.sentiment_positive_score_threshold,
+        negative_score_threshold=settings.sentiment_negative_score_threshold,
     )
 
 
@@ -170,9 +181,16 @@ def _get_finbert_components():
 
     with _MODEL_LOCK:
         if _TOKENIZER is None:
-            _TOKENIZER = AutoTokenizer.from_pretrained(MODEL_NAME, use_fast=True)
+            _TOKENIZER = AutoTokenizer.from_pretrained(
+                MODEL_NAME,
+                revision=MODEL_REVISION,
+                use_fast=True,
+            )
         if _MODEL is None:
-            _MODEL = AutoModelForSequenceClassification.from_pretrained(MODEL_NAME)
+            _MODEL = AutoModelForSequenceClassification.from_pretrained(
+                MODEL_NAME,
+                revision=MODEL_REVISION,
+            )
             _MODEL.eval()
         return _TOKENIZER, _MODEL
 
@@ -184,6 +202,8 @@ def _predict_chunks(
     model,
     *,
     max_chunk_tokens: int,
+    positive_score_threshold: float,
+    negative_score_threshold: float,
 ) -> list:
     title_text = title.strip()
     body_chunks = chunk_article_text(
@@ -209,6 +229,8 @@ def _predict_chunks(
                 token_count=_count_tokens(text=title_text, tokenizer=tokenizer),
                 weight=TITLE_WEIGHT,
                 probabilities=title_probabilities,
+                positive_score_threshold=positive_score_threshold,
+                negative_score_threshold=negative_score_threshold,
             )
         )
 
@@ -227,6 +249,8 @@ def _predict_chunks(
                 token_count=chunk.token_count,
                 weight=chunk.weight,
                 probabilities=probabilities,
+                positive_score_threshold=positive_score_threshold,
+                negative_score_threshold=negative_score_threshold,
             )
         )
 

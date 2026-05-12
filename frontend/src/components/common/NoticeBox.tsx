@@ -16,7 +16,7 @@ export const NoticeBox = ({contents} : NoticeBoxProps) => {
       {/* 내용 영역 */}
       <ul className="flex flex-col gap-1">
         {contents.map((item, index) => (
-          <li key={index} className="pl-8 text-xs text-amber-800">{item}</li>
+          <li key={index} className="pl-8 text-xs text-amber-800 leading-relaxed">{item}</li>
         ))}
       </ul>
     </div>
