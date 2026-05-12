@@ -1,0 +1,26 @@
+# 환경변수 / 시크릿
+.env
+.env.*
+!.env.example
+
+# Claude Code 로컬 설정
+.claude/
+
+# OS
+.DS_Store
+Thumbs.db
+
+# IDE
+.idea/
+.vscode/
+*.iml
+
+# 빌드 산출물
+build/
+dist/
+.gradle/
+node_modules/
+__pycache__/
+*.pyc
+*.class
+*.jar
