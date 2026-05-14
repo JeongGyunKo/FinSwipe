@@ -21,6 +21,24 @@ public class TickerService {
 
     private final TickerNameRepository repo;
 
+    // self-invocation 시 @Cacheable 우회 방지 — 앱 생명주기 동안 유효한 필드 캐시
+    private volatile Map<String, TickerInfo> tickerInfoCache = null;
+
+    private Map<String, TickerInfo> getTickerInfoCache() {
+        if (tickerInfoCache == null) {
+            synchronized (this) {
+                if (tickerInfoCache == null) {
+                    tickerInfoCache = repo.findAll().stream()
+                            .collect(java.util.stream.Collectors.toMap(
+                                    t -> t.getTicker(),
+                                    TickerInfo::from));
+                    log.info("[티커 캐시] {}개 로드", tickerInfoCache.size());
+                }
+            }
+        }
+        return tickerInfoCache;
+    }
+
     @Cacheable(CacheConfig.CACHE_TICKERS)
     public List<TickerInfo> getAllTickers() {
         log.info("Loading all tickers from DB");
@@ -42,17 +60,16 @@ public class TickerService {
 
     /**
      * 티커 목록에 회사명 정보를 붙여서 반환 [{ticker, corp, ko}, ...]
-     * findAllById 배치 조회로 N+1 방지
+     * 필드 캐시 사용 — self-invocation으로 @Cacheable 우회되는 문제 해결 (23번 DB 쿼리 → 1번)
      */
     public List<Map<String, String>> enrichTickers(List<String> tickers) {
         if (tickers == null || tickers.isEmpty()) return List.of();
-        Map<String, TickerName> infoMap = repo.findAllById(tickers).stream()
-                .collect(Collectors.toMap(TickerName::getTicker, t -> t));
+        Map<String, TickerInfo> infoMap = getTickerInfoCache();
         return tickers.stream()
                 .map(t -> {
                     Map<String, String> m = new java.util.HashMap<>();
                     m.put("ticker", t);
-                    TickerName info = infoMap.get(t);
+                    TickerInfo info = infoMap.get(t);
                     if (info != null) {
                         m.put("corp", info.getCorp());
                         m.put("ko", info.getKo());

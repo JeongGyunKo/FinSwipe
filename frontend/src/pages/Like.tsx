@@ -75,7 +75,9 @@ export const Like = () => {
       alert("저장에 실패했습니다.");
     }else {
       alert("관심 종목이 저장되었습니다.");
-      navigate("/");
+      setTimeout(() => {
+        navigate("/", { replace: true });
+      }, 100);
     }
   };  
   

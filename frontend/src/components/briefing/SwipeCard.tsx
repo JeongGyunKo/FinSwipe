@@ -23,8 +23,8 @@ export const SwipeCard = ({ data, groupTicker, articles, index  }: {
   const gaData = {
     news_id: data.id,
     ticker: groupTicker,
-    sentiment_label: data.sentiment_label as any,
-    sentiment_score: data.sentiment_score ?? 0, // 데이터에 점수가 있다면 넣고 없으면 0
+    sentiment_label: data.sentimentLabel as any,
+    sentiment_score: data.sentimentScore ?? 0, // 데이터에 점수가 있다면 넣고 없으면 0
     card_index: index + 1, // 보통 분석 시에는 1부터 시작하는 걸 선호합니다.
     deck_size: articles.length,
     is_push_entry: false, // 진입 경로 로직에 따라 수정 가능
@@ -38,7 +38,7 @@ export const SwipeCard = ({ data, groupTicker, articles, index  }: {
     trackEvent("card_tapped", {
       news_id: data.id,
       ticker: groupTicker,
-      sentiment_label: data.sentiment_label,
+      sentiment_label: data.sentimentLabel,
       card_index: index + 1
     });
 
@@ -57,7 +57,7 @@ export const SwipeCard = ({ data, groupTicker, articles, index  }: {
       `}>
       {/* 이미지 */}
       <div className='overflow-hidden h-40 bg-gray-100'>
-        <img src={data.image_url || defaultThumb} alt="" className='w-full h-full object-cover'/>
+        <img src={data.imageUrl || defaultThumb} alt="" className='w-full h-full object-cover'/>
       </div>
 
       {/* 상단 티커 정보 */}
@@ -75,7 +75,7 @@ export const SwipeCard = ({ data, groupTicker, articles, index  }: {
         </div>        
         <span className='relative flex gap-1 text-white/90 text-xs'>
           <img src={clock} alt="" />
-          {getTimeAgo(data.published_at)}
+          {getTimeAgo(data.publishedAt)}
         </span>
       </div>
 
@@ -83,26 +83,26 @@ export const SwipeCard = ({ data, groupTicker, articles, index  }: {
       <div className='flex flex-col gap-2 h-33 p-4'>
         <div className="flex items-center gap-2">
           <span className={`px-2 h-5 rounded-sm text-sm font-medium ${
-            data.sentiment_label === 'positive' ? 'bg-emerald-50 text-[#22C55E]' : 
-            data.sentiment_label === 'negative' ? 'bg-rose-50 text-[#EF4444]' : 
-            data.sentiment_label === 'mixed' ? 'bg-yellow-50 text-[#F59E0B]' : 
+            data.sentimentLabel === 'positive' ? 'bg-emerald-50 text-[#22C55E]' : 
+            data.sentimentLabel === 'negative' ? 'bg-rose-50 text-[#EF4444]' : 
+            data.sentimentLabel === 'mixed' ? 'bg-yellow-50 text-[#F59E0B]' : 
             'bg-gray-100 text-gray-500' // Neutral
             }`}
           >
-            {data.sentiment_label}
+            {data.sentimentLabel}
           </span>
           {data.categories.map((cate, index) => (
             <span key={index} className='text-xs text-gray-400'>{cate}</span>
           ))}  
         </div>
-        <div className='text-gray-900 text-4 font-bold line-clamp-1'>{data.headline_ko}</div>
-        <div className="text-sm text-gray-600 line-clamp-2">{data.summary_3lines_ko?.[0] ?? ""}</div>
+        <div className='text-gray-900 text-4 font-bold line-clamp-1'>{data.headlineKo}</div>
+        <div className="text-sm text-gray-600 line-clamp-2">{data.summary3linesKo?.[0] ?? ""}</div>
         
       </div>
 
       {/* 하단 출처 자세히보기 */}
       <div className='flex justify-between items-center p-4 border-t border-solid border-gray-200'>
-        <div className="text-xs text-gray-500">{getSourceName(data.source_url)}</div> 
+        <div className="text-xs text-gray-500">{getSourceName(data.sourceUrl)}</div> 
         <div className='px-3 py-1.5 text-xs text-blue-600 font-semibold cursor-pointer'>자세히 보기 →</div>
       </div>
     </div>

@@ -29,8 +29,15 @@ export const getWebPushToken = async () => {
     }
 
     const messaging = getMessaging(app);    
+
+    const VAPID_KEY = import.meta.env.VITE_VAPID_KEY;
+    if (!VAPID_KEY) {
+      console.error("VAPID KEY가 로드되지 않았습니다.");
+      return null;
+    }
+
     const currentToken = await getToken(messaging, {
-      vapidKey: import.meta.env.VITE_VAPID_KEY
+      vapidKey: VAPID_KEY
     });
 
     return currentToken;

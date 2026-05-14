@@ -7,10 +7,8 @@ import com.finswipe.domain.entity.NewsArticle;
 import com.finswipe.domain.repository.NewsArticleRepository;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.beans.factory.annotation.Qualifier;
-import org.springframework.data.domain.PageRequest;
 import org.springframework.http.MediaType;
 import org.springframework.stereotype.Service;
-import org.springframework.transaction.annotation.Transactional;
 import org.springframework.web.client.RestClient;
 import org.springframework.web.client.RestClientResponseException;
 
@@ -62,6 +60,7 @@ public class NewsCollectorService {
     private final AppProperties props;
 
     private final AtomicBoolean reanalysisRunning = new AtomicBoolean(false);
+    private final AtomicBoolean freshAnalysisRunning = new AtomicBoolean(false);
 
     public NewsCollectorService(@Qualifier("finlightRestClient") RestClient finlightClient,
                                 NewsArticleRepository newsRepo,
@@ -324,10 +323,15 @@ public class NewsCollectorService {
         return Map.of("saved", saved, "skipped", skipped);
     }
 
-    /** 신규 수집 기사 분석 — FCM 알림 발송 포함 */
+    /** 신규 수집 기사 분석 — FCM 알림 발송 포함, 최우선 실행 */
     public void analyzeAndUpdate(List<NewsArticle> articles) {
         if (articles.isEmpty()) return;
-        doAnalyzeAndUpdate(articles, true);
+        freshAnalysisRunning.set(true);
+        try {
+            doAnalyzeAndUpdate(articles, true);
+        } finally {
+            freshAnalysisRunning.set(false);
+        }
     }
 
     /** 재분석 전용 — FCM 알림 발송 안 함, 이미 실행 중이면 스킵 */
@@ -376,6 +380,11 @@ public class NewsCollectorService {
                     try { newsRepo.markCleanFiltered(link); } catch (Exception e) {
                         log.error("[백그라운드] clean_filtered 표시 실패 ({}): {}", truncate(link), e.getMessage());
                     }
+                } else if (!sendFcm) {
+                    // 재분석 모드에서 GenAI 타임아웃 → 재시도 카운트 증가
+                    try { newsRepo.incrementRetryCount(link); } catch (Exception e) {
+                        log.warn("[백그라운드] retry_count 증가 실패 ({}): {}", truncate(link), e.getMessage());
+                    }
                 }
                 skipped.incrementAndGet();
                 return;
@@ -400,6 +409,11 @@ public class NewsCollectorService {
                     }
                     deleted.incrementAndGet();
                 } else {
+                    if (!sendFcm) {
+                        try { newsRepo.incrementRetryCount(link); } catch (Exception e) {
+                            log.warn("[백그라운드] retry_count 증가 실패 ({}): {}", truncate(link), e.getMessage());
+                        }
+                    }
                     log.info("[백그라운드] xai 없음 (재시도 대기): {}", truncate(link));
                     skipped.incrementAndGet();
                 }
@@ -462,9 +476,13 @@ public class NewsCollectorService {
                 updated.get(), deleted.get(), failed.get(), skipped.get());
     }
 
-    /** Python: reanalyze_unanalyzed() */
+    /** Python: reanalyze_unanalyzed() — 신규 기사 분석 중이면 스킵 */
     public int reanalyzeUnanalyzed(int limit) {
-        List<NewsArticle> unanalyzed = newsRepo.findUnanalyzed(PageRequest.of(0, limit));
+        if (freshAnalysisRunning.get()) {
+            log.debug("[재분석] 신규 기사 분석 중 → 스킵");
+            return 0;
+        }
+        List<NewsArticle> unanalyzed = newsRepo.findUnanalyzed(limit);
         if (unanalyzed.isEmpty()) return 0;
         log.info("[재분석] 미분석 기사 {}개 발견 → 분석 시작", unanalyzed.size());
         boolean ran = analyzeAndUpdate(unanalyzed, true);
@@ -472,15 +490,18 @@ public class NewsCollectorService {
     }
 
     /** Python: cleanup_old_content() */
-    @Transactional
     public void cleanupOldContent() {
         try {
             newsRepo.deleteArticlesWithoutContent();
-            newsRepo.deleteArticlesWithoutTickers();
-            log.info("[정리] content/tickers 없는 기사 삭제 완료");
         } catch (Exception e) {
-            log.error("[정리] 삭제 실패: {}", e.getMessage());
+            log.error("[정리] content 없는 기사 삭제 실패: {}", e.getMessage());
         }
+        try {
+            newsRepo.deleteArticlesWithoutTickers();
+        } catch (Exception e) {
+            log.error("[정리] tickers 없는 기사 삭제 실패: {}", e.getMessage());
+        }
+        log.info("[정리] content/tickers 없는 기사 삭제 완료");
     }
 
     /**

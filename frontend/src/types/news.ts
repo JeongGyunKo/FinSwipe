@@ -18,19 +18,19 @@ export interface XaiKo {
 //뉴스
 export interface NewsCardData {
   id: string;                // uuid
-  headline_ko: string;          // 제목
-  content_preview: string;   // 원문 300자
+  headlineKo: string;          // 제목
+  contentPreview: string;   // 원문 300자
   summary: string;           // 전체 요약 텍스트
-  summary_3lines_ko: string[];  // jsonb (3줄 요약 배열)
-  xai_ko: XaiKo | null;      // 3줄 요약 하이라이트
-  source_url: string;        // 원문 링크
+  summary3linesKo: string[];  // jsonb (3줄 요약 배열)
+  xaiKo: XaiKo | null;      // 3줄 요약 하이라이트
+  sourceUrl: string;        // 원문 링크
   tickers: string[];         // 관련 종목 (배열)
-  ticker_names: TickerNameInfo[];
-  sentiment_label: string;
-  sentiment_score: number;
-  published_at: string;      // 날짜
+  tickerNames: TickerNameInfo[];
+  sentimentLabel: string;
+  sentimentScore: number;
+  publishedAt: string;      // 날짜
   categories: string[];      // 카테고리
-  image_url: string;         // 썸네일
+  imageUrl: string;         // 썸네일
   is_read?: boolean;
 }
 
