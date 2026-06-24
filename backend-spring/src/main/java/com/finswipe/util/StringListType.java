@@ -11,7 +11,7 @@ import java.util.Objects;
 
 /**
  * PostgreSQL text[] ↔ List<String> 매핑.
- * ArrayJdbcType(PgArray) 대신 rs.getString()으로 읽어 Supabase 풀러 호환성 확보.
+ * ArrayJdbcType(PgArray) 대신 rs.getString()으로 읽어 PostgreSQL 드라이버 호환성 확보.
  */
 public class StringListType implements UserType<List<String>> {
 
@@ -23,8 +23,8 @@ public class StringListType implements UserType<List<String>> {
     }
 
     @Override
+    @SuppressWarnings("unchecked")
     public Class<List<String>> returnedClass() {
-        //noinspection unchecked
         return (Class<List<String>>) (Class<?>) List.class;
     }
 

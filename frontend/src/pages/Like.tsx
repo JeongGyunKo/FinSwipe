@@ -1,10 +1,9 @@
 import { useEffect, useState } from "react";
 import { searchTickerNames } from "../api/tickerService";
 import { useNavigate } from "react-router-dom";
-import { supabase } from "../lib/supabase";
 import type { TickerNameInfo } from "../types/tickers";
 import { StockCard } from "../components/setup/StockCard";
-import { Navigation } from "../components/layout/Navigation"
+import { DialMenu } from "../components/layout/DialMenu";
 import { Input } from "../components/common/input"
 import { Button } from "../components/common/button"
 //이미지
@@ -16,27 +15,41 @@ export const Like = () => {
   const [stocks, setStocks] = useState<TickerNameInfo[]>([]);
   const [selectedTickers, setSelectedTickers] = useState<string[]>([]);
   const [searchTerm, setSearchTerm] = useState("");
+  const [isFirstTime, setIsFirstTime] = useState(false);
+
+  const API_BASE_URL = import.meta.env.VITE_API_BASE_URL;
 
   useEffect(() => {
     const loadInitial = async () => {
-    // 초기 50개 로드
-    const stocks = await searchTickerNames("");
-    setStocks(stocks);
+      const token = localStorage.getItem('accessToken');
+      const allStocks = await searchTickerNames(""); // 한 번만 호출
 
-    // 기존 저장된 티커 불러오기
-    const { data: { session } } = await supabase.auth.getSession();
-    if (!session) return;
+      if (!token) {
+        setStocks(allStocks);
+        return;
+      }
 
-    const { data } = await supabase
-      .from('user_profiles')
-      .select('tickers')
-      .eq('id', session.user.id)
-      .single();
+      try {
+        const response = await fetch(`${API_BASE_URL}/user/tickers`, {
+          headers: { 'Authorization': `Bearer ${token}` }
+        });
+        if (response.ok) {
+          const data = await response.json();
+          const tickers = Array.isArray(data.tickers) ? data.tickers : [];
+          setSelectedTickers(tickers);
+          if (tickers.length === 0) setIsFirstTime(true);
 
-    if (data?.tickers) {
-      setSelectedTickers(data.tickers);
-    }
-  };
+          const sorted = [
+            ...allStocks.filter(s => tickers.includes(s.ticker)),
+            ...allStocks.filter(s => !tickers.includes(s.ticker)).slice(0, 50),
+          ];
+          setStocks(sorted);
+        }
+      } catch (error) {
+        console.error("관심 티커 불러오기 실패:", error);
+        setStocks(allStocks);
+      }
+    };
     loadInitial();
   }, []);
 
@@ -48,6 +61,8 @@ export const Like = () => {
     };
     search();
   }, [searchTerm]);
+
+  
 
   // 종목 선택 Toggle
   const toggleStock = (ticker: string) => {
@@ -62,22 +77,30 @@ export const Like = () => {
   const clearAll = () => setSelectedTickers([]);
 
   //데이터 저장
-  const handleSave = async () => {
-    const { data: {session} } = await supabase.auth.getSession();
-    if(!session) return alert("로그인이 필요합니다.");
+  const handleSave = async () => {    
+    const token = localStorage.getItem('accessToken');
+    console.log('handleSave token:', token);
+    if(!token) return alert("로그인이 필요합니다.");    
 
-    const { error } = await supabase
-    .from('user_profiles')
-    .update({tickers: selectedTickers})
-    .eq('id', session.user.id);
+    try {
+      const response = await fetch(`${API_BASE_URL}/user/tickers`, {
+        method: 'PUT',
+        headers: {
+          'Authorization': `Bearer ${token}`,
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({ tickers: selectedTickers }),
+      });
 
-    if(error){
-      alert("저장에 실패했습니다.");
-    }else {
+      if (!response.ok) throw new Error("저장 실패");
+
       alert("관심 종목이 저장되었습니다.");
       setTimeout(() => {
-        navigate("/", { replace: true });
+        navigate(isFirstTime ? "/quiz" : "/", { replace: true });
       }, 100);
+    } catch (error) {
+      console.error("관심 티커 저장 실패:", error);
+      alert("저장에 실패했습니다.");
     }
   };  
   
@@ -122,12 +145,12 @@ export const Like = () => {
     </div>
 
     {/* 하단바 */}
-    <div className="fixed bottom-16 z-50 left-1/2 -translate-x-1/2 w-full min-w-80 max-w-107.5 p-4 bg-white border-t border-gray-100">
+    <div className="fixed bottom-0 left-1/2 -translate-x-1/2 w-full min-w-80 max-w-107.5 p-4 bg-white border-t border-gray-100">
       <Button variant="primary" disabled={selectedTickers.length === 0} onClick={handleSave}>
         {selectedTickers.length}개 종목 저장하기
       </Button>
     </div>
-    <Navigation showDisclaimer={false}/>
+    <DialMenu />
     </>
   );
 };

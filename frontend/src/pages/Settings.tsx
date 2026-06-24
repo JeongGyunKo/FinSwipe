@@ -1,11 +1,11 @@
 import { useEffect, useState } from "react";
-import { supabase } from "../lib/supabase";
+import { Link } from "react-router-dom";
 import { Capacitor } from '@capacitor/core';
 import { FirebaseMessaging } from '@capacitor-firebase/messaging';
 import { getWebPushToken } from '../lib/firebase';
 //컴포넌트
 import { Header } from "../components/layout/Header";
-import { Navigation } from "../components/layout/Navigation";
+import { DialMenu } from "../components/layout/DialMenu";
 import { NoticeBox } from "../components/common/NoticeBox";
 //이미지
 import bellAllOff from "../assets/ic_bell_all_off.svg";
@@ -16,84 +16,67 @@ import bellOnGreen from "../assets/ic_bell_on_green.svg";
 export const Settings = () => {
   const [allAlarm, setAllAlarm] = useState(false);
   const [sentimentAlarm, setSentimentAlarm] = useState(false);
+  const API_BASE_URL = import.meta.env.VITE_API_BASE_URL;
 
-  // 페이지 로드 시 기존 설정 불러오기
+  // 설정 불러오기
+  const fetchSettings = async () => {
+    const accessToken = localStorage.getItem("accessToken");
+    if (!accessToken) return;
+
+    const response = await fetch(`${API_BASE_URL}/news/notification-settings`, {
+      headers: { Authorization: `Bearer ${accessToken}` },
+    });
+    const data = await response.json();
+    setAllAlarm(data.notify_all_news);
+    setSentimentAlarm(data.notify_sentiment_news);
+  };
+
   useEffect(() => {
-    const fetchSettings = async () => {
-      const { data: { user } } = await supabase.auth.getUser();
-      if (!user) return;
-
-      const { data, error } = await supabase
-        .from('device_tokens')
-        .select('notify_all_news, notify_sentiment_news')
-        .eq('user_id', user.id)
-        .limit(1)
-        .maybeSingle();
-
-      if (data && !error) {
-        setAllAlarm(data.notify_all_news);
-        setSentimentAlarm(data.notify_sentiment_news);
-      }
-    };
     fetchSettings();
   }, []);
 
-  // DB 업데이트 공통 함수 (동기화)
+  // 설정 업데이트
   const updateSettingsDB = async (isAll: boolean, isSentiment: boolean) => {
-    const { data: { user } } = await supabase.auth.getUser();
-    if (!user) return false;
+    const accessToken = localStorage.getItem("accessToken");
+    if (!accessToken) return false;
 
-    let currentToken = "";
-    if (Capacitor.isNativePlatform()) {
-      const { token } = await FirebaseMessaging.getToken();
-      currentToken = token;
-    } else {
-      const webToken = await getWebPushToken();
-      if (webToken) currentToken = webToken;
-    }
-
-    if (!currentToken) {
-      console.log("토큰을 찾을 수 없어 DB 업데이트를 건너뜁니다.");
-      return false;
-    }
-
-    await supabase
-      .from('device_tokens')
-      .upsert({ user_id: user.id, token: currentToken }, { onConflict: 'token' });
-
-    const { error } = await supabase
-      .from('device_tokens')
-      .update({ 
+    const response = await fetch(`${API_BASE_URL}/news/notification-settings`, {
+      method: "PUT",
+      headers: {
+        Authorization: `Bearer ${accessToken}`,
+        "Content-Type": "application/json",
+      },
+      body: JSON.stringify({
         notify_all_news: isAll,
-        notify_sentiment_news: isSentiment
-      })
-      .eq('user_id', user.id);
+        notify_sentiment_news: isSentiment,
+      }),
+    });
 
-    if (error) {
+    if (!response.ok) {
       alert("설정 저장에 실패했습니다.");
       return false;
     }
     return true;
-  }
+  };
 
-  // 권한 요청 및 초기 저장 함수
+  // 토큰 등록
   const requestAndSaveToken = async (isAll: boolean, isSentiment: boolean) => {
-    const { data: { user } } = await supabase.auth.getUser();
-    if (!user) return false;
+    const accessToken = localStorage.getItem("accessToken");
+    if (!accessToken) return false;
 
     // 🌐 웹 브라우저
     if (!Capacitor.isNativePlatform()) {
       try {
         const webToken = await getWebPushToken();
         if (webToken) {
-          // 백엔드 전송 (선택 사항)
-          const API_BASE_URL = import.meta.env.VITE_API_URL;
-          await fetch(`${API_BASE_URL}/news/device-token?user_id=${user.id}`, {
+          await fetch(`${API_BASE_URL}/news/device-token`, {
             method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ token: webToken }),
+            headers: {
+              'Content-Type': 'application/json',
+              Authorization: `Bearer ${accessToken}`,
+            },
+            body: JSON.stringify({ token: webToken, platform: "web" }),
           });
-          
           return await updateSettingsDB(isAll, isSentiment);
         } else {
           alert("웹 브라우저 알림 권한을 허용해주세요!");
@@ -110,15 +93,14 @@ export const Settings = () => {
       const permission = await FirebaseMessaging.requestPermissions();
       if (permission.receive === 'granted') {
         const { token } = await FirebaseMessaging.getToken();
-        
-        // 백엔드 전송
-        const API_BASE_URL = import.meta.env.VITE_API_BASE_URL;
-        await fetch(`${API_BASE_URL}/news/device-token?user_id=${user.id}`, {
+        await fetch(`${API_BASE_URL}/news/device-token`, {
           method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ token }),
+          headers: {
+            'Content-Type': 'application/json',
+            Authorization: `Bearer ${accessToken}`,
+          },
+          body: JSON.stringify({ token, platform: "android" }),
         });
-
         return await updateSettingsDB(isAll, isSentiment);
       } else {
         alert("휴대폰 설정에서 알림 권한을 허용해 주세요!");
@@ -166,7 +148,7 @@ export const Settings = () => {
       setSentimentAlarm(false);
       setAllAlarm(false);
     }
-  };
+  };  
 
   const noticeBox = [
     "본 서비스에서 제공하는 정보는 투자 참고용이며, 수익성을 보장하지 않습니다. 모든 투자 결정은 본인의 책임 하에 이루어져야 하며, 투자로 인한 손실에 대해 당사는 책임지지 않습니다.",
@@ -231,10 +213,29 @@ export const Settings = () => {
         </ul>
       </div>
 
+      {/* 약관 */}
+      <div className="flex flex-col gap-4">
+        <h3 className="text-lg font-bold text-gray-900">약관 및 정책</h3>
+        <ul className="border border-gray-200 rounded-2xl">
+          <li className="border-b border-gray-200">
+            <Link to="/terms" className="flex items-center justify-between h-18 px-4">
+              <p className="text-base text-gray-700">이용약관</p>
+              <span className="text-gray-400">›</span>
+            </Link>
+          </li>
+          <li>
+            <Link to="/privacy" className="flex items-center justify-between h-18 px-4">
+              <p className="text-base text-gray-700">개인정보처리방침</p>
+              <span className="text-gray-400">›</span>
+            </Link>
+          </li>
+        </ul>
+      </div>
+
       {/* 투자 유의사항 */}
         <NoticeBox contents={noticeBox} />
     </div>
-    <Navigation showDisclaimer={false}/>
+    <DialMenu />
     </>
   );
 };

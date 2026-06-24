@@ -28,6 +28,8 @@ public class AppProperties {
     @Valid
     private Admin admin = new Admin();
 
+    private Swagger swagger = new Swagger();
+
     private Cors cors = new Cors();
     private Cache cache = new Cache();
     @Valid
@@ -66,6 +68,15 @@ public class AppProperties {
 
     @Getter
     @Setter
+    public static class Swagger {
+        /** 스웨거 문서 Basic 인증 사용자명 (기본값 finswipe) */
+        private String user = "finswipe";
+        /** 스웨거 문서 Basic 인증 비밀번호 — SWAGGER_PASSWORD 환경변수로만 주입. 비어 있으면 문서 접근 전면 차단. */
+        private String password = "";
+    }
+
+    @Getter
+    @Setter
     public static class Cors {
         private List<String> origins = List.of("*");
     }
@@ -84,6 +95,8 @@ public class AppProperties {
         private int publicRpm = 30;
         @Min(1)
         private int adminRpm = 300;
+        @Min(1)
+        private int quizRpm = 20;   // 비인증 퀴즈(POST /quiz) LLM 비용 어뷰즈 방지용 별도 한도
     }
 
     @Getter
@@ -93,5 +106,20 @@ public class AppProperties {
         private String projectId = "";
         private String clientEmail = "";
         private String privateKey = "";
+    }
+
+    @Valid
+    private Auth auth = new Auth();
+
+    @Getter
+    @Setter
+    public static class Auth {
+        @NotBlank
+        @Size(min = 32, message = "JWT 시크릿은 최소 32자 이상이어야 합니다")
+        private String jwtSecret;
+        private long accessTokenExpiryMs = 604800000L; // 7일
+        private String googleClientId = "";
+        private String appBaseUrl = "https://api.finswipe.co.kr";
+        private String frontendBaseUrl = "https://www.finswipe.co.kr";
     }
 }

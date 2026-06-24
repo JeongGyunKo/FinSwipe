@@ -1,6 +1,5 @@
 import { useParams, useNavigate, useLocation } from "react-router-dom";
 import { useEffect, useState, useMemo } from "react";
-import { supabase } from '../lib/supabase';
 import type { NewsCardData } from '../types/news';
 import { Header } from "../components/layout/Header"
 //유틸리티
@@ -34,16 +33,19 @@ export const NewsDetail = () => {
     if (!news || !id) return;
 
     const markAsRead = async () => {
-      const { data: { session } } = await supabase.auth.getSession();
-      if (session && id) {
-        try {
-          const API_BASE_URL = import.meta.env.VITE_API_BASE_URL;
-          await fetch(`${API_BASE_URL}/news/${id}/read?userId=${session.user.id}`, {
-            method: 'POST',
-          });
-        } catch (err) {
-          console.error("백엔드 읽음 처리 실패:", err);
-        }
+      const accessToken = localStorage.getItem('accessToken');
+      if (!accessToken || !id) return;
+
+      try {
+        const API_BASE_URL = import.meta.env.VITE_API_BASE_URL;
+        await fetch(`${API_BASE_URL}/news/${id}/read`, {
+          method: 'POST',
+          headers: {
+            'Authorization': `Bearer ${accessToken}`,
+          },
+        });
+      } catch (err) {
+        console.error("백엔드 읽음 처리 실패:", err);
       }
     };
     markAsRead();
@@ -123,7 +125,7 @@ export const NewsDetail = () => {
             <p className="text-lg font-bold text-gray-900">3줄 요약</p>
             <div className="flex items-center gap-1 h-8 px-3 rounded-lg bg-gray-100">
               <p className="text-sm font-medium text-gray-700">감성점수</p>
-              <p className="text-sm font-bold text-gray-900">{Math.floor(news.sentimentScore * 100)}</p>
+              <p className="text-sm font-bold text-gray-900">{news.sentimentScore}</p>
             </div>
         </div>        
         <ul className="flex flex-col gap-3">
@@ -169,7 +171,7 @@ export const NewsDetail = () => {
       )}
 
       {/* 본문 요약영역 */}
-      <div className="p-5 rounded-2xl border border-gray-200 bg-white text-sm text-gray-700 whitespace-pre-wrap leading-relaxed">{news.contentPreview}</div>
+      {/* <div className="p-5 rounded-2xl border border-gray-200 bg-white text-sm text-gray-700 whitespace-pre-wrap leading-relaxed">{news.contentPreview}</div> */}
 
       {/* 하단버튼 */}
       <div className="fixed bottom-0 left-1/2 -translate-x-1/2 w-full min-w-80 max-w-107.5 z-50">

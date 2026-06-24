@@ -167,4 +167,3 @@ def _fetch_operational_stats(*, base_url: str, timeout: float) -> dict[str, obje
 
 if __name__ == "__main__":
     raise SystemExit(main())
-

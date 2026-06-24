@@ -34,6 +34,18 @@ dependencies {
     implementation("org.springframework.boot:spring-boot-starter-cache")
     implementation("com.github.ben-manes.caffeine:caffeine")
 
+    // HTTP 연결 풀 (Apache HttpClient 5)
+    implementation("org.apache.httpcomponents.client5:httpclient5")
+
+    // Security + JWT
+    implementation("org.springframework.boot:spring-boot-starter-security")
+    implementation("io.jsonwebtoken:jjwt-api:0.12.6")
+    runtimeOnly("io.jsonwebtoken:jjwt-impl:0.12.6")
+    runtimeOnly("io.jsonwebtoken:jjwt-jackson:0.12.6")
+
+    // Mail
+    implementation("org.springframework.boot:spring-boot-starter-mail")
+
     // Validation
     implementation("org.springframework.boot:spring-boot-starter-validation")
 
@@ -62,4 +74,9 @@ dependencies {
 
 tasks.withType<Test> {
     useJUnitPlatform()
+}
+
+// JAR 파일명 고정 (배포 스크립트에서 경로 단순화)
+tasks.named<org.springframework.boot.gradle.tasks.bundling.BootJar>("bootJar") {
+    archiveFileName = "app.jar"
 }

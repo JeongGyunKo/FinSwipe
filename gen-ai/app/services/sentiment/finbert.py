@@ -181,10 +181,12 @@ def _get_finbert_components():
 
     with _MODEL_LOCK:
         if _TOKENIZER is None:
+            # use_fast=False: Python 토크나이저 → GIL로 스레드 안전, 병렬 추론 가능
+            # use_fast=True(Rust)는 RefCell로 동시 호출 시 "Already borrowed" 패닉 발생
             _TOKENIZER = AutoTokenizer.from_pretrained(
                 MODEL_NAME,
                 revision=MODEL_REVISION,
-                use_fast=True,
+                use_fast=False,
             )
         if _MODEL is None:
             _MODEL = AutoModelForSequenceClassification.from_pretrained(

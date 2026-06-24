@@ -1,9 +1,8 @@
 import { useState, useEffect, type ChangeEvent } from "react";
 import { validatePassword, validatePasswordMatch, validateLoginId } from "../utils/validation";
-import { supabase } from "../lib/supabase";
 //컴포넌트
 import { Header } from "../components/layout/Header";
-import { Navigation } from "../components/layout/Navigation";
+import { DialMenu } from "../components/layout/DialMenu";
 import { Input } from "../components/common/input";
 import { Button } from "../components/common/button";
 //이미지
@@ -12,35 +11,36 @@ import myIcon from "../assets/ic_my.svg";
 import pwIcon from "../assets/ic_password.svg";
 
 export const ProfileEdit = () => {
-
+  const API_BASE_URL = import.meta.env.VITE_API_BASE_URL;
   const [email, setEmail] = useState("");
+  const [authProvider, setAuthProvider] = useState<"google" | "email" | null>(null);
   const [formData, setFormData] = useState({
     loginId: "",
-    nickname: "",
+    displayName: "",
     password: "",
     confirmPassword: "",
   });
   const [isIdChecked, setIsIdChecked] = useState(false);
   const [originalLoginId, setOriginalLoginId] = useState("");
 
-  useEffect(() => {
+   useEffect(() => {
     const loadProfile = async () => {
-      const {data: {session}} = await supabase.auth.getSession();
-      if(!session) return;
+      const accessToken = localStorage.getItem("accessToken");
+      const response = await fetch(`${API_BASE_URL}/user/profile`, {
+        headers: { Authorization: `Bearer ${accessToken}` },
+      });
+      const data = await response.json();
+      console.log("프로필 응답:", data);
 
-      setEmail(session.user.email ?? "");
-
-      const { data } = await supabase
-        .from("user_profiles")
-        .select("login_id, nickname")
-        .eq("id", session.user.id)
-        .maybeSingle();
-
-        if (data) {
-        setFormData(prev => ({ ...prev, loginId: data.login_id, nickname: data.nickname ?? "" }));
-        setOriginalLoginId(data.login_id);
-        setIsIdChecked(true);
-      }
+      // 받아온 데이터로 state 세팅
+      setEmail(data.email);
+      setAuthProvider(data.authProvider);
+      setFormData(prev => ({
+        ...prev,
+        loginId: data.loginId ?? "",
+        displayName: data.displayName ?? "",
+      }));
+      setOriginalLoginId(data.loginId ?? "");
     };
     loadProfile();
   }, []);
@@ -60,46 +60,63 @@ export const ProfileEdit = () => {
       return alert("현재 사용 중인 아이디입니다.");
     }
 
-    const { data } = await supabase
-      .from("user_profiles")
-      .select("login_id")
-      .eq("login_id", formData.loginId)
-      .maybeSingle();
+    const accessToken = localStorage.getItem("accessToken");
+    const response = await fetch(
+      `${API_BASE_URL}/auth/check-login-id?loginId=${formData.loginId}`,
+      {
+        headers: { Authorization: `Bearer ${accessToken}` },
+      }
+    );
 
-    if (data) {
-      alert("이미 사용 중인 아이디입니다.");
-      setIsIdChecked(false);
-    } else {
+    const data = await response.json();
+    console.log("중복확인 응답:", data);
+
+    if (data.available) {
       alert("사용 가능한 아이디입니다.");
       setIsIdChecked(true);
+    } else {
+      alert("이미 사용 중인 아이디입니다.");
+      setIsIdChecked(false);
     }
   };
 
   const isPasswordValid = formData.password ? validatePassword(formData.password) : true;
   const isPasswordMatch = formData.password ? validatePasswordMatch(formData.password, formData.confirmPassword) : true;
 
-  const canSubmit = isIdChecked && isPasswordValid && isPasswordMatch;
+  const canSubmit = authProvider === "google" 
+  ? true 
+  : isIdChecked && isPasswordValid && isPasswordMatch;
 
   const handleSave = async () => {
-    if (!canSubmit) return;
+    const accessToken = localStorage.getItem("accessToken");
+    if (!accessToken) return;
+
     try {
-      const { data: { session } } = await supabase.auth.getSession();
-      if (!session) return;
+      // 구글 유저: displayName만
+      // 이메일 유저: displayName + loginId + password
+      const body: Record<string, string> = {
+        displayName: formData.displayName,
+      };
 
-      // user_profiles 업데이트
-      const { error: profileError } = await supabase
-        .from("user_profiles")
-        .update({ login_id: formData.loginId, nickname: formData.nickname })
-        .eq("id", session.user.id);
-
-      if (profileError) throw profileError;
-
-      // 비밀번호 입력했을 때만 변경
-      if (formData.password) {
-        const { error: pwError } = await supabase.auth.updateUser({ password: formData.password });
-        if (pwError) throw pwError;
+      if (authProvider === "email") {
+        if (!isIdChecked) return alert("아이디 중복확인을 해주세요.");
+        if (!isPasswordValid) return alert("비밀번호를 확인해주세요.");
+        if (!isPasswordMatch) return alert("비밀번호가 일치하지 않습니다.");
+        
+        body.loginId = formData.loginId;
+        if (formData.password) body.password = formData.password;
       }
 
+      const response = await fetch(`${API_BASE_URL}/user/profile`, {
+        method: "PATCH",
+        headers: {
+          "Content-Type": "application/json",
+          Authorization: `Bearer ${accessToken}`,
+        },
+        body: JSON.stringify(body),
+      });
+
+      if (!response.ok) throw new Error("저장 실패");
       alert("저장되었습니다.");
     } catch (error) {
       if (error instanceof Error) alert(error.message);
@@ -114,32 +131,36 @@ export const ProfileEdit = () => {
           <Input label="이메일" value={email} icon={mailIcon} disabled onChange={() => {}} />
           <p className="text-xs text-gray-400 px-1">이메일은 변경할 수 없습니다</p>
         </div>
-        <div className="flex flex-col gap-2">
+        {authProvider === "email" && (
+          <>
+          <div className="flex flex-col gap-2">
+            <Input
+              label="아이디" name="loginId" value={formData.loginId}
+              onChange={handleChange} placeholder="8자 이상 입력" icon={myIcon}
+            />
+            <Button variant="outline" size="md" onClick={handleIdCheck} disabled={isIdChecked}>
+              {isIdChecked ? "확인 완료" : "중복확인"}
+            </Button>
+          </div>
           <Input
-            label="아이디" name="loginId" value={formData.loginId}
-            onChange={handleChange} placeholder="8자 이상 입력" icon={myIcon}
+            label="비밀번호" name="password" value={formData.password}
+            onChange={handleChange} isPassword placeholder="비밀번호 (8자 이상)" icon={pwIcon}
           />
-          <Button variant="outline" size="md" onClick={handleIdCheck} disabled={isIdChecked}>
-            {isIdChecked ? "확인 완료" : "중복확인"}
-          </Button>
-        </div>
+          <Input
+            label="비밀번호 확인" name="confirmPassword" value={formData.confirmPassword}
+            onChange={handleChange} isPassword placeholder="비밀번호를 다시 입력하세요" icon={pwIcon}
+          />
+          </>
+        )}        
         <Input
-          label="비밀번호" name="password" value={formData.password}
-          onChange={handleChange} isPassword placeholder="비밀번호 (8자 이상)" icon={pwIcon}
-        />
-        <Input
-          label="비밀번호 확인" name="confirmPassword" value={formData.confirmPassword}
-          onChange={handleChange} isPassword placeholder="비밀번호를 다시 입력하세요" icon={pwIcon}
-        />
-        <Input
-          label="닉네임(선택)" name="nickname" value={formData.nickname}
+          label="닉네임(선택)" name="displayName" value={formData.displayName}
           onChange={handleChange} placeholder="사용하실 닉네임을 입력하세요" icon={myIcon}
         />
         <Button onClick={handleSave} disabled={!canSubmit} className="mt-6" variant="primary" size="lg">
           저장하기
         </Button>
       </div>
-      <Navigation showDisclaimer={false}/>
+      <DialMenu />
     </>
   );
 };

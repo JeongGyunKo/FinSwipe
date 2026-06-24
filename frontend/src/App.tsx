@@ -1,16 +1,15 @@
 import { useEffect } from "react";
-import { initGA } from "./lib/analytics/config";
+// import { initGA } from "./lib/analytics/config";
 import Router from './shared/Router';
 import { FirebaseMessaging } from '@capacitor-firebase/messaging';
 import { Capacitor } from '@capacitor/core';
-import { supabase } from './lib/supabase';
 import './lib/firebase';
 
 
 function App() {
 
   useEffect(() => {
-    initGA();
+    //initGA();
     
     const initPush = async () => {
       if (Capacitor.isNativePlatform()) {
@@ -20,13 +19,17 @@ function App() {
           if (check.receive === 'granted') {
           const { token } = await FirebaseMessaging.getToken();
 
-          const { data: { session } } = await supabase.auth.getSession();
-          if (!session) return;
+          const accessToken = localStorage.getItem('accessToken');
+          const userId = localStorage.getItem('userId');
+          if (!accessToken || !userId) return;
 
           const API_BASE_URL = import.meta.env.VITE_API_BASE_URL;
-          await fetch(`${API_BASE_URL}/news/device-token?user_id=${session.user.id}`, {
+          await fetch(`${API_BASE_URL}/news/device-token?user_id=${userId}`, {
             method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
+            headers: {
+              'Content-Type': 'application/json',
+              'Authorization': `Bearer ${accessToken}`,
+            },
             body: JSON.stringify({ token }),
           });
         }

@@ -61,6 +61,38 @@ public class AnalyzerService {
         }
     }
 
+    /**
+     * 헤드라인 전용 경량 번역 배치 — retry_count 관계없이 headline_ko만 채움.
+     * @return id → headline_ko 매핑 (번역 실패 항목 제외)
+     */
+    public Map<String, String> translateHeadlinesBatch(List<Map<String, String>> items) {
+        if (items.isEmpty()) return Map.of();
+        try {
+            String body = objectMapper.writeValueAsString(Map.of("items", items));
+            String response = genaiClient.post()
+                    .uri("/api/v1/analysis/translate-headlines")
+                    .contentType(MediaType.APPLICATION_JSON)
+                    .body(body)
+                    .exchange((req, res) -> {
+                        byte[] bytes = res.getBody().readAllBytes();
+                        return bytes.length > 0 ? new String(bytes, java.nio.charset.StandardCharsets.UTF_8) : "{}";
+                    });
+            JsonNode root = objectMapper.readTree(response);
+            Map<String, String> result = new HashMap<>();
+            for (JsonNode r : root.path("results")) {
+                String id = r.path("id").asText(null);
+                String ko = r.path("headline_ko").asText(null);
+                if (id != null && ko != null && !ko.isBlank()) {
+                    result.put(id, ko);
+                }
+            }
+            return result;
+        } catch (Exception e) {
+            log.warn("[헤드라인 번역] 배치 실패: {}", e.getMessage());
+            return Map.of();
+        }
+    }
+
     /** Python: analyze_news_batch() */
     public List<EnrichmentResult> analyzeBatch(List<NewsArticle> articles) {
         List<NewsArticle> valid = articles.stream()
@@ -82,7 +114,6 @@ public class AnalyzerService {
                     try {
                         submitSemaphore.acquire();
                         try {
-                            Thread.sleep(1000);
                             return enrichSingle(article);
                         } finally {
                             submitSemaphore.release();
@@ -127,7 +158,6 @@ public class AnalyzerService {
                     try {
                         submitSemaphore.acquire();
                         try {
-                            Thread.sleep(1000);
                             return enrichSingle(article);
                         } finally {
                             submitSemaphore.release();
@@ -164,9 +194,6 @@ public class AnalyzerService {
         body.put("title", article.getHeadline() != null ? article.getHeadline() : "");
         body.put("link", link + cacheBuster);
         body.put("article_text", content.strip());
-        if (article.getSummary() != null && !article.getSummary().isBlank()) {
-            body.put("summary_text", article.getSummary().strip());
-        }
         if (article.getTickers() != null && !article.getTickers().isEmpty()) {
             body.put("ticker", article.getTickers());
         }
@@ -246,8 +273,14 @@ public class AnalyzerService {
                     xaiKo = objectMapper.writeValueAsString(localized.get("xai"));
                 }
             }
+            String sentimentReason = root.path("sentiment_reason").asText(null);
+            String eventCategory = root.path("event_category").asText(null);
+            Boolean sentimentDivergence = root.has("sentiment_divergence") && !root.get("sentiment_divergence").isNull()
+                    ? root.path("sentiment_divergence").asBoolean() : null;
+
             return new EnrichmentResult(sourceUrl, sentimentLabel, sentimentScore,
-                    summary3lines, xai, headlineKo, summary3linesKo, xaiKo, rawJson, outcome);
+                    summary3lines, xai, headlineKo, summary3linesKo, xaiKo, sentimentReason,
+                    eventCategory, sentimentDivergence, rawJson, outcome);
 
         } catch (Exception e) {
             log.warn("[GenAI] 응답 파싱 실패: {} | {}", sourceUrl, e.getMessage());
@@ -301,12 +334,15 @@ public class AnalyzerService {
         private final String headlineKo;
         private final List<String> summary3linesKo;
         private final String xaiKo;
+        private final String sentimentReason;
+        private final String eventCategory;
+        private final Boolean sentimentDivergence;
         private final String rawResponse;
         private final String outcome;
 
         public static EnrichmentResult unavailable(String sourceUrl) {
             return new EnrichmentResult(sourceUrl, "unavailable", null,
-                    null, null, null, null, null, null, "fatal_failure");
+                    null, null, null, null, null, null, null, null, null, "fatal_failure");
         }
 
         /** GenAI 서버와 통신 자체가 성공했는지 (빈 응답 포함) */

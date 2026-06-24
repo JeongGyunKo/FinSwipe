@@ -8,14 +8,17 @@ spring:
     password: ${DB_PASSWORD}
     driver-class-name: org.postgresql.Driver
     hikari:
-      maximum-pool-size: 5
-      minimum-idle: 2
+      maximum-pool-size: 20
+      minimum-idle: 5
       connection-timeout: 30000
+      idle-timeout: 600000
+      max-lifetime: 1800000
+      leak-detection-threshold: 60000
 
   flyway:
-    enabled: true
     baseline-on-migrate: true
     baseline-version: 0
+    validate-on-migrate: false
 
   jpa:
     hibernate:
@@ -31,9 +34,25 @@ spring:
   cache:
     type: caffeine
 
+  mail:
+    host: smtp.gmail.com
+    port: 587
+    username: ${MAIL_USERNAME:}
+    password: ${MAIL_PASSWORD:}
+    properties:
+      mail.smtp.auth: true
+      mail.smtp.starttls.enable: true
+    default-encoding: UTF-8
+
   threads:
     virtual:
       enabled: true
+
+springdoc:
+  api-docs:
+    enabled: ${ENABLE_SWAGGER:false}
+  swagger-ui:
+    enabled: ${ENABLE_SWAGGER:false}
 
 server:
   port: 8080
@@ -56,19 +75,29 @@ app:
     password: ${GENAI_PASSWORD}
     connect-timeout-seconds: 10
     read-timeout-seconds: 300
-    concurrent-requests: 4
+    concurrent-requests: 8
   admin:
     api-key: ${ADMIN_API_KEY}
+  swagger:
+    user: ${SWAGGER_USER:finswipe}
+    password: ${SWAGGER_PASSWORD:}
   cors:
-    origins: ${CORS_ORIGINS:*}
+    origins: ${CORS_ORIGINS:https://www.finswipe.co.kr}
   cache:
     news-ttl-seconds: 30
     tickers-ttl-seconds: 3600
   rate-limit:
-    public-rpm: 30
+    public-rpm: 120
     admin-rpm: 300
+    quiz-rpm: 20
   fcm:
     service-account-json: ${FCM_SERVICE_ACCOUNT_JSON:}
     project-id: ${FCM_PROJECT_ID:}
     client-email: ${FCM_CLIENT_EMAIL:}
     private-key: ${FCM_PRIVATE_KEY:}
+  auth:
+    jwt-secret: ${JWT_SECRET}
+    access-token-expiry-ms: ${JWT_ACCESS_EXPIRY_MS:7776000000}
+    google-client-id: ${GOOGLE_CLIENT_ID:}
+    app-base-url: ${APP_BASE_URL:https://api.finswipe.co.kr}
+    frontend-base-url: ${FRONTEND_BASE_URL:https://www.finswipe.co.kr}

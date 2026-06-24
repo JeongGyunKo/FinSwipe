@@ -8,6 +8,11 @@ from fastapi.staticfiles import StaticFiles
 from app.api.routes.enrichment import router as enrichment_router
 from app.api.routes.health import router as health_router
 from app.api.routes.ingestion import router as ingestion_router
+from app.api.routes.agent import router as agent_router
+from app.api.routes.quiz import router as quiz_router
+from app.api.routes.technicals import router as technicals_router
+from app.api.routes.chat import router as chat_router
+from app.api.routes.ticker_names import router as ticker_names_router
 from app.api.routes.web import router as web_router
 from app.core import get_settings
 from app.core.auth import (
@@ -56,7 +61,24 @@ async def warm_database_backend() -> None:
         except Exception:
             logger.exception("Background database initialization failed during startup.")
 
+    async def _warmup_finbert() -> None:
+        try:
+            from app.services.sentiment.finbert import _get_finbert_components
+            await asyncio.to_thread(_get_finbert_components)
+            logger.info("FinBERT model pre-loaded successfully.")
+        except Exception:
+            logger.warning("FinBERT warmup failed — will load on first request.")
+
+    async def _warmup_quiz_pool() -> None:
+        try:
+            from app.services.quiz.service import warmup_question_pool
+            await asyncio.to_thread(warmup_question_pool)
+        except Exception:
+            logger.warning("퀴즈 문제 풀 워밍업 실패 — 첫 요청 시 생성됩니다.")
+
     asyncio.create_task(_initialize_in_background())
+    asyncio.create_task(_warmup_finbert())
+    asyncio.create_task(_warmup_quiz_pool())
 
 
 @app.middleware("http")
@@ -69,4 +91,9 @@ app.include_router(health_router)
 app.include_router(web_router)
 app.include_router(ingestion_router, prefix="/api/v1")
 app.include_router(enrichment_router, prefix="/api/v1")
+app.include_router(quiz_router, prefix="/api/v1")
+app.include_router(agent_router, prefix="/api/v1")
+app.include_router(technicals_router, prefix="/api/v1")
+app.include_router(chat_router, prefix="/api/v1")
+app.include_router(ticker_names_router, prefix="/api/v1")
 app.mount("/static", StaticFiles(directory=WEB_DIR), name="static")

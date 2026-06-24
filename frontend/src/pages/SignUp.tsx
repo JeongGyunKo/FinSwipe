@@ -1,7 +1,6 @@
 import { useState, type ChangeEvent } from "react";
 import { Link, useNavigate } from "react-router-dom";
 import { validateEmail, validatePassword, validatePasswordMatch, validateLoginId } from "../utils/validation";
-import { supabase } from '../lib/supabase';
 //컴포넌트
 import { Header } from "../components/layout/Header"
 import { Input } from "../components/common/input";
@@ -14,7 +13,7 @@ import myIcon from "../assets/ic_my.svg";
 import pwIcon from "../assets/ic_password.svg";
 
 export const SignUp = () => {
-  const navigate = useNavigate();
+  const navigate = useNavigate();  
 
   // 입력값 상태 관리
   const [formData, setFormData] = useState({
@@ -26,27 +25,44 @@ export const SignUp = () => {
   });
 
   const [isEmailChecked, setIsEmailChecked] = useState(false);
+  const [emailError, setEmailError] = useState("");
   const [isIdChecked, setIsIdChecked] = useState(false);
   const [isTermsChecked, setTermsChecked] = useState(false);
-  const [isDisclaimerChecked, setDisclaimerChecked] = useState(false);
+  const [isDisclaimerChecked, setDisclaimerChecked] = useState(false);  
+  const API_BASE_URL = import.meta.env.VITE_API_BASE_URL;
 
   // 이메일 중복 검사
   const handleEmailCheck = async () => {
     if (!formData.email) return alert("이메일을 입력해주세요.");
     if (!validateEmail(formData.email)) return alert("이메일 형식이 올바르지 않습니다.");
 
-    const { data } = await supabase
-      .from('user_profiles')
-      .select('email')
-      .eq('email', formData.email)
-      .maybeSingle();
+    try {
+      const response = await fetch(
+        `${API_BASE_URL}/auth/check-email?email=${encodeURIComponent(formData.email)}`
+      );
+      const data = await response.json();
+      console.log("이메일 중복확인 응답:", data); // 실제 필드 확인용
 
-    if (data) {
-      alert("이미 가입된 이메일입니다.");
-      setIsEmailChecked(false);
-    } else {
+      // Google 계정으로 가입된 이메일
+      if (data.reason === "google") {
+        setEmailError("Google 계정으로 이미 가입된 이메일입니다. Google 로그인을 이용해주세요.");
+        setIsEmailChecked(false);
+        return;
+      }
+
+      // 일반 이메일 중복 확인
+      if (!response.ok || data.available === false) {
+        setEmailError(data.message || "이메일 확인에 실패했습니다.");
+        setIsEmailChecked(false);
+        return;
+      }
+
       alert("사용 가능한 이메일입니다.");
+      setEmailError("");
       setIsEmailChecked(true);
+    } catch (error) {
+      console.error("이메일 중복확인 실패:", error);
+      alert("중복확인 중 오류가 발생했습니다.");
     }
   };
 
@@ -56,18 +72,17 @@ export const SignUp = () => {
       return alert("아이디를 8자 이상 입력해주세요.");
     }
 
-    const { data } = await supabase
-      .from('user_profiles')
-      .select('login_id')
-      .eq('login_id', formData.loginId)
-      .maybeSingle();
+    const response = await fetch(
+      `${API_BASE_URL}/auth/check-login-id?loginId=${formData.loginId}`
+    );
+    const data = await response.json();
 
-    if (data) {
-      alert("이미 사용 중인 아이디입니다.");
-      setIsIdChecked(false);
-    } else {
+    if (data.available) {
       alert("사용 가능한 아이디입니다.");
       setIsIdChecked(true);
+    } else {
+      alert("이미 사용 중인 아이디입니다.");
+      setIsIdChecked(false);
     }
   };
 
@@ -96,44 +111,32 @@ export const SignUp = () => {
   const handleSignUp = async () => {
     if (!canSubmit) return;
     try {
-      const { data: authData, error: authError } = await supabase.auth.signUp({
-        email: formData.email,
-        password: formData.password,
-        options: {
-          data: {
-            login_id: formData.loginId,
-            nickname: formData.nickname,
-          }
-        }
+      const response = await fetch(`${API_BASE_URL}/auth/register`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          email: formData.email,
+          password: formData.password,
+          displayName: formData.nickname || formData.loginId,
+          loginId: formData.loginId,
+        }),
       });
 
-      if (authError) {
-        if (authError.message.includes('already registered')) {
-          alert("이미 가입된 이메일입니다. 구글 로그인을 이용해주세요.");
+      if (!response.ok) {
+        const error = await response.json();
+        console.log("에러 응답:", error);
+        if (response.status === 409) {
+          alert("이미 가입된 이메일입니다.");
         } else {
-          alert(authError.message);
+          alert(error.message || "회원가입에 실패했습니다.");
         }
         return;
       }
 
-      if (authData.user) {
-        const { error: profileError } = await supabase.from('user_profiles').insert([{
-          id: authData.user.id,
-          login_id: formData.loginId,
-          email: formData.email,
-          nickname: formData.nickname,
-          tickers: [],
-        }]);
-
-        if (profileError) throw profileError;
-
-        alert(`${formData.email}로 인증 메일이 발송되었습니다.\n메일함을 확인하고 링크를 클릭해주세요.`);
-        navigate('/Login');
-      }
+      alert(`${formData.email}로 인증 메일이 발송되었습니다.\n메일함을 확인하고 링크를 클릭해주세요.`);
+      navigate('/login');
     } catch (error) {
-      if (error instanceof Error) {
-        alert(error.message);
-      }
+      if (error instanceof Error) alert(error.message);
     }
   };
 
@@ -173,6 +176,9 @@ export const SignUp = () => {
               icon={mailIcon}
               disabled={isEmailChecked}
             />
+            {emailError && (
+              <p className="text-xs text-red-500 px-1">{emailError}</p>
+            )}
             <Button variant="outline" size="md" onClick={handleEmailCheck} disabled={isEmailChecked}>
               {isEmailChecked ? "확인 완료" : "중복확인"}
             </Button>
@@ -196,7 +202,7 @@ export const SignUp = () => {
             value={formData.password}
             onChange={handleChange}
             isPassword
-            placeholder="8자 이상 입력"
+            placeholder="8자 이상, 영문 소문자+숫자 포함"
             icon={pwIcon}
           />
           <Input 

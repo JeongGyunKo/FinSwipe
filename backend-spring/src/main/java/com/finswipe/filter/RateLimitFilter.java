@@ -18,6 +18,7 @@ import org.springframework.stereotype.Component;
 import org.springframework.web.filter.OncePerRequestFilter;
 
 import java.io.IOException;
+import java.nio.charset.StandardCharsets;
 import java.security.MessageDigest;
 import java.time.Duration;
 
@@ -43,7 +44,25 @@ public class RateLimitFilter extends OncePerRequestFilter {
             return;
         }
 
+        // CORS preflight(OPTIONS)은 실제 API 호출이 아니므로 rate limit 제외 — 로드당 요청수 절반 감소
+        if ("OPTIONS".equalsIgnoreCase(request.getMethod())) {
+            filterChain.doFilter(request, response);
+            return;
+        }
+
         String ip = IpExtractorUtil.extractRealIp(request);
+
+        // 퀴즈 문제 생성(POST /quiz/**)은 비인증 공개 + Gemini 호출 → LLM 비용 어뷰즈 방지용 엄격 한도
+        if ("POST".equalsIgnoreCase(request.getMethod()) && request.getRequestURI().startsWith("/quiz/")) {
+            Bucket quizBucket = buckets.get(ip + ":quiz", k -> buildBucket(props.getRateLimit().getQuizRpm()));
+            if (!quizBucket.tryConsume(1)) {
+                response.setStatus(HttpStatus.TOO_MANY_REQUESTS.value());
+                response.setContentType(MediaType.APPLICATION_JSON_VALUE);
+                response.getWriter().write("{\"error\":\"Rate limit exceeded. Please slow down.\"}");
+                return;
+            }
+        }
+
         boolean isAdmin = request.getRequestURI().startsWith("/news/") && isAdminEndpoint(request);
 
         int rpm = isAdmin ? props.getRateLimit().getAdminRpm() : props.getRateLimit().getPublicRpm();
@@ -64,7 +83,7 @@ public class RateLimitFilter extends OncePerRequestFilter {
         String provided = request.getHeader("X-Admin-Key");
         if (provided == null) return false;
         String expected = props.getAdmin().getApiKey();
-        return expected != null && MessageDigest.isEqual(provided.getBytes(), expected.getBytes());
+        return expected != null && MessageDigest.isEqual(provided.getBytes(StandardCharsets.UTF_8), expected.getBytes(StandardCharsets.UTF_8));
     }
 
     private Bucket buildBucket(int rpm) {

@@ -35,6 +35,13 @@ from app.services.translation import build_localized_content
 
 logger = logging.getLogger(__name__)
 
+_SENTIMENT_LABELS_KO: dict[SentimentLabel, str] = {
+    SentimentLabel.BULLISH: "강세",
+    SentimentLabel.BEARISH: "약세",
+    SentimentLabel.NEUTRAL: "중립",
+    SentimentLabel.MIXED: "혼합",
+}
+
 
 def build_enrichment_storage_payload(
     *,
@@ -50,11 +57,15 @@ def build_enrichment_storage_payload(
     summary_3lines: list[str] | None = None,
     sentiment_result: FinBERTSentimentResult | None = None,
     xai_result: XAIResult | None = None,
+    sentiment_reason: str | None = None,
+    event_category: str | None = None,
+    sentiment_divergence: bool | None = None,
     article_mixed: ArticleMixedDetectionResult | None = None,
     ticker_mixed: TickerMixedDetectionResult | None = None,
     tickers: list[str] | None = None,
     analyzed_at: datetime | None = None,
     errors: list[StoragePayloadError] | None = None,
+    prebuilt_headline_ko: str | None = None,
 ) -> EnrichmentStoragePayload:
     """Assemble a database-ready storage payload from enrichment stage outputs."""
     cleaned_text_normalized = (cleaned_text or "").strip()
@@ -73,6 +84,7 @@ def build_enrichment_storage_payload(
         is_mixed=bool(article_mixed and article_mixed.is_mixed),
         tickers=tickers,
         analysis_outcome=analysis_outcome,
+        prebuilt_headline_ko=prebuilt_headline_ko,
     )
 
     aggregated_errors = list(errors or [])
@@ -98,6 +110,9 @@ def build_enrichment_storage_payload(
         summary_3lines=normalized_summary,
         sentiment=stored_sentiment,
         xai=xai_result,
+        sentiment_reason=sentiment_reason,
+        event_category=event_category,
+        sentiment_divergence=sentiment_divergence,
         localized=localized,
         article_mixed=article_mixed,
         ticker_mixed=ticker_mixed,
@@ -207,6 +222,13 @@ def _build_localized_content_excerpt(cleaned_text: str) -> str | None:
     return excerpt or normalized[:limit]
 
 
+_TICKER_BOX_LABELS_KO = {
+    "revenue": "매출", "net_income": "순이익", "operating_income": "영업이익",
+    "guidance": "가이던스", "target_price": "목표주가", "dividend": "배당",
+    "eps": "EPS", "yoy": "YoY", "qoq": "QoQ", "market_cap": "시가총액", "pe_ratio": "PER",
+}
+
+
 def _build_stored_localized_content(
     *,
     title: str,
@@ -217,19 +239,33 @@ def _build_stored_localized_content(
     is_mixed: bool,
     tickers: list[str] | None,
     analysis_outcome: AnalysisOutcome,
+    prebuilt_headline_ko: str | None = None,
 ) -> LocalizedArticleContent | None:
     if analysis_outcome == AnalysisOutcome.FILTERED:
         return None
 
-    summary_lines = [
-        SummaryLine(line_number=index, text=text)
-        for index, text in enumerate(summary_3lines, start=1)
-    ]
     localized_sentiment = _map_sentiment_label(sentiment_label, is_mixed=is_mixed)
+
+    # 통합 분석 결과가 있으면 Gemini 번역 호출 없이 바로 생성
+    if prebuilt_headline_ko:
+        localized_summary = [
+            SummaryLine(line_number=i + 1, text=line)
+            for i, line in enumerate(summary_3lines)
+        ] if summary_3lines else []
+        return LocalizedArticleContent(
+            language="ko",
+            title=prebuilt_headline_ko,
+            content=None,
+            summary_3lines=localized_summary,
+            xai=None,
+            sentiment_label=_SENTIMENT_LABELS_KO.get(localized_sentiment),
+            ticker_box_labels=dict(_TICKER_BOX_LABELS_KO),
+        )
+
     return build_localized_content(
         title=title,
         content_text=content_text,
-        summary_3lines=summary_lines,
+        summary_3lines=[],
         xai=_build_localized_xai_payload(xai_result, localized_sentiment),
         sentiment_label=localized_sentiment,
         tickers=tickers,
@@ -315,38 +351,11 @@ def _append_payload_warnings(
     if analysis_outcome == AnalysisOutcome.FILTERED:
         return
 
-    if not normalized_summary:
-        errors.append(
-            StoragePayloadError(
-                stage=PipelineStageName.SUMMARIZE,
-                message="Summary generation returned no usable lines.",
-                fatal=False,
-            )
-        )
     if localized is None:
         errors.append(
             StoragePayloadError(
                 stage=PipelineStageName.BUILD_PAYLOAD,
                 message="Localized Korean payload is empty.",
-                fatal=False,
-            )
-        )
-    elif not localized.summary_3lines and normalized_summary:
-        errors.append(
-            StoragePayloadError(
-                stage=PipelineStageName.BUILD_PAYLOAD,
-                message="Localized payload has title but no translated summary lines.",
-                fatal=False,
-            )
-        )
-    elif len(localized.summary_3lines) < len(normalized_summary):
-        errors.append(
-            StoragePayloadError(
-                stage=PipelineStageName.BUILD_PAYLOAD,
-                message=(
-                    "Localized payload has fewer translated summary lines than the source summary. "
-                    f"translated={len(localized.summary_3lines)} source={len(normalized_summary)}"
-                ),
                 fatal=False,
             )
         )

@@ -27,9 +27,6 @@ public class NewsArticle {
     @Column(nullable = false)
     private String headline;
 
-    @Column(columnDefinition = "text")
-    private String summary;
-
     @Column(name = "summary_3lines", columnDefinition = "jsonb")
     @JdbcTypeCode(SqlTypes.JSON)
     private List<String> summary3lines;
@@ -70,10 +67,6 @@ public class NewsArticle {
     @Column(name = "sentiment_score")
     private Double sentimentScore;
 
-    @Column(columnDefinition = "jsonb")
-    @JdbcTypeCode(SqlTypes.JSON)
-    private String xai;
-
     @Column(name = "is_mixed")
     private Boolean isMixed;
 
@@ -84,9 +77,20 @@ public class NewsArticle {
     @Type(StringListType.class)
     private List<String> summary3linesKo;
 
-    @Column(name = "xai_ko", columnDefinition = "jsonb")
-    @JdbcTypeCode(SqlTypes.JSON)
-    private String xaiKo;
+    @Column(name = "sentiment_reason", columnDefinition = "text")
+    private String sentimentReason;
+
+    @Column(name = "event_category")
+    private String eventCategory;
+
+    @Column(name = "sentiment_divergence")
+    private Boolean sentimentDivergence;
+
+    @Column(name = "novelty_score")
+    private Double noveltyScore;
+
+    @Column(name = "price_at_collection")
+    private Double priceAtCollection;
 
     @Column(name = "created_at", updatable = false)
     private OffsetDateTime createdAt;

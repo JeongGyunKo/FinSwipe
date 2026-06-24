@@ -33,7 +33,8 @@
 *   **Analytics**: `react-ga4` (사용자 행동 추적 및 데이터 세니타이징 구현)
 
 ### **Infrastructure Integration (BaaS)**
-*   **Authentication & DB**: Supabase (유저 프로필 및 티커 관심 목록 관리)
+*   **Cloud Platform**: AWS EC2 (Seoul, t3.micro) + AWS RDS (PostgreSQL)
+*   **Authentication**: Google OAuth
 *   **Cloud Messaging**: Firebase (FCM 서비스 워커를 통한 백그라운드 푸시 구현)
 
 ---
@@ -44,8 +45,7 @@ src/
  ┣ 📂 components/     # 재사용 가능한 UI 컴포넌트
  ┣ 📂 hooks/          # 비즈니스 로직 캡슐화를 위한 커스텀 훅
  ┣ 📂 lib/            # 외부 서비스 연동 로직
- ┃ ┣ 📂 analytics/    # GA4 이벤트 정의 및 데이터 정제(Sanitize) 로직
- ┃ ┣ 📂 supabase/     # DB 클라이언트 설정
+ ┃ ┣ 📂 analytics/    # GA4 이벤트 정의 및 데이터 정제(Sanitize) 로직 
  ┃ ┗ 📂 firebase/     # FCM 메시징 설정
  ┣ 📂 types/          # 전역 타입 및 GA 이벤트 인터페이스 정의
  ┗ 📜 main.tsx

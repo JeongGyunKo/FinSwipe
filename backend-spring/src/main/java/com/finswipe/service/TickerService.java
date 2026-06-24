@@ -1,17 +1,24 @@
 package com.finswipe.service;
 
 import com.finswipe.config.CacheConfig;
-import com.finswipe.domain.entity.TickerName;
 import com.finswipe.domain.repository.TickerNameRepository;
 import com.finswipe.dto.response.TickerInfo;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.cache.annotation.Cacheable;
+import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.stereotype.Service;
 
+import java.sql.Array;
+import java.sql.Date;
+import java.time.LocalDate;
+import java.util.ArrayList;
+import java.util.Arrays;
+import java.util.HashSet;
 import java.util.List;
 import java.util.Map;
 import java.util.Optional;
+import java.util.Set;
 import java.util.stream.Collectors;
 
 @Service
@@ -20,6 +27,7 @@ import java.util.stream.Collectors;
 public class TickerService {
 
     private final TickerNameRepository repo;
+    private final JdbcTemplate jdbc;
 
     // self-invocation 시 @Cacheable 우회 방지 — 앱 생명주기 동안 유효한 필드 캐시
     private volatile Map<String, TickerInfo> tickerInfoCache = null;
@@ -28,15 +36,40 @@ public class TickerService {
         if (tickerInfoCache == null) {
             synchronized (this) {
                 if (tickerInfoCache == null) {
-                    tickerInfoCache = repo.findAll().stream()
-                            .collect(java.util.stream.Collectors.toMap(
-                                    t -> t.getTicker(),
-                                    TickerInfo::from));
+                    tickerInfoCache = loadActiveTickersFromDb();
                     log.info("[티커 캐시] {}개 로드", tickerInfoCache.size());
                 }
             }
         }
         return tickerInfoCache;
+    }
+
+    /** 상장폐지(delisted_at IS NOT NULL) 제외한 활성 종목만 로드. aliases·delisting_date 포함. */
+    private Map<String, TickerInfo> loadActiveTickersFromDb() {
+        return jdbc.query(
+                "SELECT ticker, corp, ko, aliases, delisting_date FROM ticker_names WHERE delisted_at IS NULL",
+                (rs, i) -> {
+                    String ticker = rs.getString("ticker");
+                    String corp   = rs.getString("corp");
+                    String ko     = rs.getString("ko");
+                    List<String> aliases = List.of();
+                    Array arr = rs.getArray("aliases");
+                    if (arr != null) {
+                        Object raw = arr.getArray();
+                        if (raw instanceof String[] sa) aliases = Arrays.asList(sa);
+                    }
+                    Date delistingDateSql = rs.getDate("delisting_date");
+                    LocalDate delistingDate = delistingDateSql != null ? delistingDateSql.toLocalDate() : null;
+                    return new TickerInfo(ticker, corp, ko, aliases, delistingDate);
+                }
+        ).stream().collect(Collectors.toMap(TickerInfo::getTicker, t -> t));
+    }
+
+    /** 캐시 무효화 — 신규 티커 추가/상장폐지 처리 후 호출 */
+    public void invalidateCache() {
+        synchronized (this) {
+            tickerInfoCache = null;
+        }
     }
 
     @Cacheable(CacheConfig.CACHE_TICKERS)
@@ -86,5 +119,32 @@ public class TickerService {
         return searchTickers(query).stream()
                 .map(TickerInfo::getTicker)
                 .collect(Collectors.toList());
+    }
+
+    /**
+     * 메시지 텍스트에 등장한 티커 — 한글명/심볼(단어 단위)/영문 사명 매칭. 챗봇 라우팅용.
+     * 가장 구체적인(한글명이 긴) 매칭이 앞에 오도록 정렬.
+     */
+    public List<TickerInfo> findMentionedTickers(String text) {
+        if (text == null || text.isBlank()) return List.of();
+        String upper = text.toUpperCase();
+        Set<String> tokens = new HashSet<>(Arrays.asList(upper.split("[^A-Z0-9]+")));
+        List<TickerInfo> matches = new ArrayList<>();
+        for (TickerInfo info : getTickerInfoCache().values()) {
+            String ko = info.getKo();
+            String corp = info.getCorp();
+            String sym = info.getTicker();
+            boolean hit = (ko != null && ko.length() >= 2 && text.contains(ko))
+                    || (sym != null && sym.length() >= 2 && tokens.contains(sym))
+                    || (corp != null && corp.length() >= 5 && upper.contains(corp.toUpperCase()))
+                    || info.getAliases().stream().anyMatch(a -> a.length() >= 2 && text.contains(a));
+            if (hit) matches.add(info);
+        }
+        matches.sort((a, b) -> {
+            int la = a.getKo() != null ? a.getKo().length() : 0;
+            int lb = b.getKo() != null ? b.getKo().length() : 0;
+            return Integer.compare(lb, la);
+        });
+        return matches;
     }
 }

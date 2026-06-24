@@ -29,7 +29,6 @@ from app.services.mixed_detector import (
 from app.services.orchestrator.status_tracker import PipelineStatusTracker
 from app.services.payload_builder import build_enrichment_storage_payload
 from app.services.sentiment import analyze_sentiment
-from app.services.summarizer import summarize_to_three_lines_result
 from app.services.text_cleaner import clean_article_text, validate_article_text
 from app.services.xai import explain_sentiment, is_xai_backend_disabled
 
@@ -127,8 +126,12 @@ class EnrichmentOrchestrator:
         summary_3lines: list[str] | None = None
         sentiment_result = None
         xai_result = None
+        sentiment_reason: str | None = None
+        event_category: str | None = None
+        sentiment_divergence: bool | None = None
         article_mixed = None
         ticker_mixed = None
+        headline_ko: str | None = None
 
         if fetch_result.fetch_status == ArticleFetchStatus.SUCCESS:
             cleaned_text, can_continue = self._run_clean_and_validate(
@@ -143,6 +146,8 @@ class EnrichmentOrchestrator:
                     tracker=tracker,
                 )
                 if sentiment_result is not None:
+                    sentiment_divergence = _compute_sentiment_divergence(sentiment_result)
+
                     if self._include_xai:
                         xai_result = self._run_xai_stage(
                             request=request,
@@ -153,8 +158,23 @@ class EnrichmentOrchestrator:
                     else:
                         tracker.skip(
                             PipelineStageName.XAI,
-                            "Skipped in the base pipeline. Run the dedicated XAI flow if explanations are required.",
+                            "XAI disabled — using sentiment_reason instead.",
                         )
+
+                    # 통합 분석: Gemini 1회 호출로 요약·감성이유·이벤트분류·헤드라인번역 동시 처리
+                    unified = self._run_unified_analysis_stage(
+                        request=request,
+                        cleaned_text=cleaned_text,
+                        sentiment_result=sentiment_result,
+                        tracker=tracker,
+                    )
+                    sentiment_reason = unified.get("sentiment_reason")
+                    event_category = unified.get("event_category")
+                    headline_ko = unified.get("headline_ko")
+                    unified_summary = unified.get("summary_3lines")
+                    if unified_summary:
+                        summary_3lines = unified_summary
+
                     article_mixed, ticker_mixed = self._run_mixed_detection_stage(
                         request=request,
                         sentiment_result=sentiment_result,
@@ -170,11 +190,7 @@ class EnrichmentOrchestrator:
                         PipelineStageName.MIXED_DETECTION,
                         "Skipped because sentiment analysis did not produce a result.",
                     )
-                summary_3lines = self._run_summary_stage(
-                    request=request,
-                    cleaned_text=cleaned_text,
-                    tracker=tracker,
-                )
+                    headline_ko = None
         else:
             self._skip_after_fetch_failure(tracker)
 
@@ -188,8 +204,12 @@ class EnrichmentOrchestrator:
             summary_3lines=summary_3lines,
             sentiment_result=sentiment_result,
             xai_result=xai_result,
+            sentiment_reason=sentiment_reason,
+            event_category=event_category,
+            sentiment_divergence=sentiment_divergence,
             article_mixed=article_mixed,
             ticker_mixed=ticker_mixed,
+            headline_ko=headline_ko,
         )
         final_payload = self._persist_payload(
             request=request,
@@ -375,68 +395,6 @@ class EnrichmentOrchestrator:
             "Article text passed validation checks.",
         )
         return cleaned_text, True
-
-    def _run_summary_stage(
-        self,
-        *,
-        request: ArticleEnrichmentRequest,
-        cleaned_text: str,
-        tracker: PipelineStatusTracker,
-    ) -> list[str] | None:
-        tracker.start(PipelineStageName.SUMMARIZE)
-        try:
-            summary_result = summarize_to_three_lines_result(
-                title=request.title,
-                article_text=cleaned_text,
-            )
-            summary_3lines = summary_result.lines
-        except Exception as exc:
-            log_event(
-                logger,
-                logging.ERROR,
-                "summary_generation_failed",
-                news_id=request.news_id,
-                error=str(exc),
-            )
-            tracker.fail(
-                PipelineStageName.SUMMARIZE,
-                f"Summary generation failed: {exc}",
-                fatal=False,
-            )
-            return None
-
-        if len(summary_3lines) == 3 and all(line.strip() for line in summary_3lines):
-            log_event(
-                logger,
-                logging.INFO,
-                "summary_generation_succeeded",
-                news_id=request.news_id,
-                summary_line_count=len(summary_3lines),
-            )
-            tracker.complete(
-                PipelineStageName.SUMMARIZE,
-                "Three-line summary generated successfully.",
-            )
-            return summary_3lines
-
-        log_event(
-            logger,
-            logging.WARNING,
-            "summary_generation_failed",
-            news_id=request.news_id,
-            summary_line_count=len(summary_3lines),
-            failure_code=summary_result.failure_code,
-            error="Summary generation did not return three usable summary lines.",
-        )
-        tracker.fail(
-            PipelineStageName.SUMMARIZE,
-            (
-                f"Summary generation did not return three usable summary lines. "
-                f"(failure_code={summary_result.failure_code or 'unknown'})"
-            ),
-            fatal=False,
-        )
-        return summary_3lines
 
     def _run_sentiment_stage(
         self,
@@ -635,6 +593,29 @@ class EnrichmentOrchestrator:
 
         return article_mixed, ticker_mixed
 
+    def _run_unified_analysis_stage(
+        self,
+        *,
+        request: ArticleEnrichmentRequest,
+        cleaned_text: str,
+        sentiment_result: SentimentResult,
+        tracker: PipelineStatusTracker,
+    ) -> dict:
+        from app.services.unified_article_analyzer import analyze_article_unified
+        try:
+            result = analyze_article_unified(
+                title=request.title,
+                article_text=cleaned_text,
+                sentiment_label=sentiment_result.label.value,
+                sentiment_score=float(sentiment_result.score),
+            )
+            tracker.complete(PipelineStageName.SUMMARIZE, "통합 분석 완료 (요약·감성이유·이벤트·번역).")
+            return result
+        except Exception as exc:
+            log_event(logger, logging.WARNING, "unified_analysis_failed", error=str(exc))
+            tracker.fail(PipelineStageName.SUMMARIZE, f"통합 분석 실패: {exc}", fatal=False)
+            return {}
+
     def _build_payload(
         self,
         *,
@@ -647,8 +628,12 @@ class EnrichmentOrchestrator:
         summary_3lines,
         sentiment_result,
         xai_result,
+        sentiment_reason: str | None = None,
+        event_category: str | None = None,
+        sentiment_divergence: bool | None = None,
         article_mixed,
         ticker_mixed,
+        headline_ko: str | None = None,
     ) -> EnrichmentStoragePayload:
         tracker.start(PipelineStageName.BUILD_PAYLOAD)
         try:
@@ -670,11 +655,15 @@ class EnrichmentOrchestrator:
                 summary_3lines=summary_3lines,
                 sentiment_result=sentiment_result,
                 xai_result=xai_result,
+                sentiment_reason=sentiment_reason,
+                event_category=event_category,
+                sentiment_divergence=sentiment_divergence,
                 article_mixed=article_mixed,
                 ticker_mixed=ticker_mixed,
                 tickers=request.ticker,
                 analyzed_at=analyzed_at,
                 errors=tracker.errors(),
+                prebuilt_headline_ko=headline_ko,
             )
         except Exception as exc:
             log_event(
@@ -828,3 +817,26 @@ class EnrichmentOrchestrator:
     ) -> None:
         for stage in stages:
             tracker.skip(stage, message)
+
+
+def _compute_sentiment_divergence(sentiment_result: SentimentResult) -> bool | None:
+    """타이틀 청크 감성이 본문 청크 지배 감성과 다를 때 True 반환."""
+    from app.schemas.sentiment import SentimentChunkSource
+    chunks = sentiment_result.chunk_results
+    if not chunks:
+        return None
+
+    title_chunks = [c for c in chunks if c.source == SentimentChunkSource.TITLE]
+    body_chunks = [c for c in chunks if c.source == SentimentChunkSource.BODY]
+
+    if not title_chunks or not body_chunks:
+        return None
+
+    title_label = title_chunks[0].label
+
+    label_weights: dict[str, float] = {}
+    for c in body_chunks:
+        label_weights[c.label.value] = label_weights.get(c.label.value, 0.0) + c.weight
+
+    body_label = max(label_weights, key=label_weights.get)
+    return title_label.value != body_label

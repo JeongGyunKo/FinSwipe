@@ -24,18 +24,21 @@ export const FindEmail = () => {
         headers: {
           "Content-Type": "application/json",
         },
-        body: JSON.stringify({ login_id: username }),
+        body: JSON.stringify({ loginId: username }),
       });
 
       const result = await response.json();
 
       // 2. 응답 처리
-      if (!response.ok) {
-        // 백엔드에서 에러 메시지를 보냈다면 해당 메시지 사용, 없다면 기본 메시지
+      if (!response.ok) {        
         throw new Error(result.message || "일치하는 이메일을 찾을 수 없습니다.");
       }
 
-      // 3. 마스킹된 이메일 상태 저장 (응답 키값이 masked_email임에 주의)
+      // 3. 마스킹된 이메일 상태 저장
+      if (!result.masked_email) {
+        setError("일치하는 이메일을 찾을 수 없습니다.");
+        return;
+      }
       setFoundEmail(result.masked_email);
 
     } catch (err: unknown) {

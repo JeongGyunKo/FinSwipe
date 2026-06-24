@@ -5,7 +5,10 @@ export const validateLoginId = (loginId: string) => {
 
 // 2. 비밀번호 유효성 검사 (8자 이상, 조합 상관없음)
 export const validatePassword = (password: string) => {
-  return password.length >= 8;
+  if (password.length < 8) return false;
+  const hasLowerCase = /[a-z]/.test(password);
+  const hasNumber = /[0-9]/.test(password);
+  return hasLowerCase && hasNumber;
 };
 
 // 3. 비밀번호 일치 확인

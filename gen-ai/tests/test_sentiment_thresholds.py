@@ -73,4 +73,3 @@ def test_aggregate_label_uses_score_thresholds_for_neutral_band() -> None:
 
     assert -8.0 < result.score < 8.0
     assert result.label == FinBERTSentimentLabel.NEUTRAL
-

@@ -63,4 +63,3 @@ Rollback immediately if one of below persists for 10+ minutes:
 - `fatal_failure` spike > 2x baseline
 - `summary_3lines_ko` empty rate > 25%
 - `xai_display` missing rate > 25%
-
