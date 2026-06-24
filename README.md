@@ -102,7 +102,7 @@ FinSwipe/
 - **Framework**: FastAPI · Python 3.11
 - **감성 분석**: FinBERT (로컬 모델)
 - **XAI**: FinBERT 어텐션 기반 (마지막 레이어 CLS 어텐션을 문장 단위로 집계 → 근거 문장 하이라이팅)
-- **LLM**: Gemini 2.5 Flash (요약 · 번역 · 개인화 · 챗봇 · 퀴즈 코치)
+- **LLM**: Gemini 2.5 Flash-Lite (`gemini-2.5-flash-lite` — 요약 · 번역 · 개인화 · 챗봇 · 퀴즈 코치)
 - **에이전트**: personalized / digest / coach / curation (LangGraph)
 - **기술 지표**: yfinance RSI(14) · MACD(12/26/9) · 거래량 비율
 - **큐**: PostgreSQL 기반 Job Queue (Worker)
