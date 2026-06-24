@@ -24,7 +24,7 @@
 
 - **📡 뉴스 자동 수집**: 15분마다 Finlight API로 영문 뉴스 수집 (NASDAQ·NYSE 거래소 필터, 상장 종목만)
 - **🧠 AI 감성 분석**: FinBERT 기반 Positive / Negative / Neutral / Mixed 분류 + 감성 점수(-100 ~ +100)
-- **💡 XAI 하이라이팅**: LIME 기반 감성 판단 근거 문장 추출 및 한국어 번역
+- **💡 XAI 하이라이팅**: FinBERT 어텐션 기반 감성 판단 근거 문장 추출 및 한국어 번역
 - **📝 3줄 요약 & 인사이트**: Gemini가 전문을 읽고 핵심 3줄 한국어 요약 + RSI 등 지표 인사이트 생성
 - **📱 스와이프 피드**: 틴더형 카드 덱, 읽은 기사 제외, 감성 테마 4종(bull·bear·neutral·mixed) 카드 디자인
 - **🤖 AI 챗봇**: 관심종목·뉴스 기반 대화, DB 기분석 토큰 0 응답, 프롬프트 인젝션 방어, 미읽음 뱃지
@@ -48,9 +48,8 @@ Spring Boot BE (AWS EC2 · Java 21)
      └── REST API + JWT 인증
               ↕
 GenAI Server (FastAPI · Worker)
-     ├── FinBERT : 감성 분석
-     ├── LIME    : XAI 근거 추출
-     └── Gemini  : 3줄 요약 · 번역 · 개인화 · 챗봇 · 퀴즈 코치
+     ├── FinBERT   : 감성 분석 + 어텐션 XAI 근거 추출
+     └── Gemini    : 3줄 요약 · 번역 · 개인화 · 챗봇 · 퀴즈 코치
               ↓ (완료 즉시 저장)
 Supabase DB ──→ Spring Boot API ──→ Frontend (React · Vercel)
    Nginx(HTTPS) ┘                       ├── 스와이프 피드 / 챗봇 / 퀴즈
@@ -102,7 +101,7 @@ FinSwipe/
 ### Gen AI
 - **Framework**: FastAPI · Python 3.11
 - **감성 분석**: FinBERT (로컬 모델)
-- **XAI**: LIME
+- **XAI**: FinBERT 어텐션 기반 (마지막 레이어 CLS 어텐션을 문장 단위로 집계 → 근거 문장 하이라이팅)
 - **LLM**: Gemini 2.5 Flash (요약 · 번역 · 개인화 · 챗봇 · 퀴즈 코치)
 - **에이전트**: personalized / digest / coach / curation (LangGraph)
 - **기술 지표**: yfinance RSI(14) · MACD(12/26/9) · 거래량 비율
