@@ -151,7 +151,6 @@ FinSwipe/
 - **API / 헬스체크**: https://api.finswipe.co.kr/health
 - **Frontend 레포**: https://github.com/naangarchive/FinSwipe
 - **Backend 레포**: https://github.com/JeongGyunKo/FinSwipe_be_springboot
-- **GenAI 레포**: https://github.com/kimhanbyul55/finn
 
 ---
 
@@ -161,5 +160,5 @@ FinSwipe/
 |------|------|
 | Backend (Spring Boot) | 고정균 |
 | Frontend | 민기낭 |
-| Gen AI | 김한별 |
+| Gen AI | 고정균 |
 | Management | 정종호 |
