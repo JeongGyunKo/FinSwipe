@@ -1,4 +1,4 @@
-import { useState, useRef, useEffect, useMemo } from "react";
+import { useState, useRef, useEffect } from "react";
 import { useNavigate } from "react-router-dom";
 import type { ChatMessage } from "../types/chat";
 //컴포넌트
@@ -15,19 +15,9 @@ export const Chat = () => {
   const [isSending, setIsSending] = useState(false);
   const [isLoading, setIsLoading] = useState(true);
   const chatEndRef = useRef<HTMLDivElement>(null);
-  const [expandedAlertDates, setExpandedAlertDates] = useState<Set<string>>(new Set());
-  const textareaRef = useRef<HTMLTextAreaElement>(null);
 
   const scrollToBottom = () => {
     chatEndRef.current?.scrollIntoView({ behavior: "smooth" });
-  };
-
-  // 높이 자동 조절
-  const handleInput = (e: React.ChangeEvent<HTMLTextAreaElement>) => {
-    setInput(e.target.value);
-    const el = e.target;
-    el.style.height = 'auto';
-    el.style.height = `${el.scrollHeight}px`;
   };
 
   useEffect(() => {
@@ -96,13 +86,10 @@ export const Chat = () => {
     }
   };
 
-  const handleKeyDown = (e: React.KeyboardEvent<HTMLTextAreaElement>) => {
+  const handleKeyDown = (e: React.KeyboardEvent<HTMLInputElement>) => {
     if (e.key === "Enter" && !e.shiftKey) {
       e.preventDefault();
       handleSend();
-      if (textareaRef.current) {
-        textareaRef.current.style.height = '44px';
-      }
     }
   };
 
@@ -123,52 +110,15 @@ export const Chat = () => {
       }
       if (!response.ok) throw new Error();
       const article = await response.json();
-
-      // sessionStorage에 기사 저장 후 홈으로 이동
-      sessionStorage.setItem('alertArticle', JSON.stringify(article));
-      navigate('/');
+      navigate(`/detail/${articleId}`, {
+        state: {
+          articles: [article],  // 배열로 감싸서 전달
+          groupTicker: article.tickers?.[0] ?? '',
+        }
+      });
     } catch {
       alert("뉴스를 불러오지 못했습니다.");
     }
-  };
-
-  // messages를 렌더링하기 전에 alert 그룹화
-  const groupedMessages = useMemo(() => {
-    const result: (ChatMessage | { type: 'alert-group'; date: string; alerts: ChatMessage[] })[] = [];
-    const alertGroups: { [date: string]: ChatMessage[] } = {};
-
-    messages.forEach(msg => {
-      if (msg.role === 'alert') {
-        const date = new Date(msg.createdAt).toLocaleDateString('ko-KR');
-        if (!alertGroups[date]) alertGroups[date] = [];
-        alertGroups[date].push(msg);
-      }
-    });
-
-    const processedDates = new Set<string>();
-
-    messages.forEach(msg => {
-      if (msg.role === 'alert') {
-        const date = new Date(msg.createdAt).toLocaleDateString('ko-KR');
-        if (!processedDates.has(date)) {
-          processedDates.add(date);
-          result.push({ type: 'alert-group', date, alerts: alertGroups[date] });
-        }
-      } else {
-        result.push(msg);
-      }
-    });
-
-    return result;
-  }, [messages]);
-
-  // alert 펼침
-  const toggleAlertGroup = (date: string) => {
-    setExpandedAlertDates(prev => {
-      const next = new Set(prev);
-      next.has(date) ? next.delete(date) : next.add(date);
-      return next;
-    });
   };
   
 
@@ -192,74 +142,46 @@ export const Chat = () => {
             </div>
           )}
 
-          {groupedMessages.map((item) => {
-            // alert 그룹
-            if ('type' in item && item.type === 'alert-group') {
-              const isExpanded = expandedAlertDates.has(item.date);
+          {messages.map((msg) => {
+            // alert 타입
+            if (msg.role === "alert") {
               return (
-                <div key={`alert-group-${item.date}`} className="flex justify-center">
-                  <div className="w-full rounded-2xl border border-amber-200 bg-amber-50 overflow-hidden">
-                    {/* 요약 헤더 */}
-                    <button
-                      onClick={() => toggleAlertGroup(item.date)}
-                      className="w-full flex items-center justify-between px-4 py-3"
-                    >
-                      <div className="flex items-center gap-2">
-                        <span className="text-sm">🔔</span>
-                        <span className="text-sm font-semibold text-amber-800">
-                          {item.alerts.length}개의 주요 뉴스 알림이 있었어요
+                <div key={msg.id} className="flex grow w-full">
+                  <div
+                    onClick={() => msg.articleId && handleAlertClick(msg.articleId)}
+                    className="w-full rounded-2xl border border-amber-200 bg-amber-50 overflow-hidden cursor-pointer active:opacity-80"
+                  >
+                    {/* 상단 헤더 */}
+                    <div className="flex flex-wrap items-center gap-2 px-3 py-2 bg-amber-100 border-b border-amber-200">
+                      <span className="text-xs font-bold text-amber-700">🔔 감성 알림</span>
+                      {msg.ticker && (
+                        <span className="ml-auto text-xs font-bold text-amber-800 bg-amber-200 px-2 py-0.5 rounded-full">
+                          ${msg.ticker}
                         </span>
-                      </div>
-                      <div className="flex items-center gap-2">
-                        <span className="text-xs text-amber-500">{item.date}</span>
-                        <span className="text-amber-600 text-sm">{isExpanded ? '▲' : '▼'}</span>
-                      </div>
-                    </button>
-
-                    {/* 확인 버튼 */}
-                    {!isExpanded && (
-                      <div className="px-4 pb-3">
-                        <button
-                          onClick={() => toggleAlertGroup(item.date)}
-                          className="w-full py-2 rounded-xl bg-amber-100 text-amber-800 text-sm font-semibold"
-                        >
-                          확인해 보시겠어요?
-                        </button>
-                      </div>
-                    )}
-
-                    {/* 펼쳐진 alert 목록 */}
-                    {isExpanded && (
-                      <div className="flex flex-col divide-y divide-amber-200 border-t border-amber-200">
-                        {item.alerts.map(alert => (
-                          <div
-                            key={alert.id}
-                            onClick={() => alert.articleId && handleAlertClick(alert.articleId)}
-                            className="px-3 py-2.5 cursor-pointer active:opacity-80"
-                          >
-                            <div className="flex items-center justify-between mb-1">
-                              {alert.ticker && (
-                                <span className="text-[10px] font-bold text-amber-800 bg-amber-200 px-2 py-0.5 rounded-full break-all max-w-[75%]">
-                                  {alert.ticker}
-                                </span>
-                              )}
-                              <time className="text-[10px] text-amber-400 ml-auto">{formatTime(alert.createdAt)}</time>
-                            </div>
-                            <p className="text-sm text-amber-900 leading-relaxed">{alert.content}</p>
-                          </div>
-                        ))}
-                      </div>
-                    )}
+                      )}
+                    </div>
+                    {/* 본문 */}
+                    <div className="px-3 py-2.5">
+                      <p className="text-sm text-amber-900 leading-relaxed">
+                        {msg.content}
+                      </p>
+                    </div>
+                    {/* 시간 */}
+                    <div className="px-3 pb-2">
+                      <time className="text-[10px] text-amber-400">{formatTime(msg.createdAt)}</time>
+                    </div>
                   </div>
                 </div>
               );
             }
 
-            // 일반 메시지
-            const msg = item as ChatMessage;
             const isMe = msg.role === "user";
+
             return (
-              <div key={msg.id} className={`flex flex-col gap-1 ${isMe ? "items-end" : "items-start"}`}>
+              <div
+                key={msg.id}
+                className={`flex flex-col gap-1 ${isMe ? "items-end" : "items-start"}`}
+              >
                 {!isMe && (
                   <p className="text-xs text-gray-400 pl-1">AI 어시스턴트</p>
                 )}
@@ -299,17 +221,15 @@ export const Chat = () => {
 
         {/* 입력 영역 */}
         <div className="shrink-0 px-4 py-3 bg-white border-t border-gray-100">
-          <div className="flex items-end gap-2">
-            <textarea
-              ref={textareaRef}
+          <div className="flex items-center gap-2">
+            <input
+              type="text"
               value={input}
-              onChange={handleInput}
+              onChange={(e) => setInput(e.target.value)}
               onKeyDown={handleKeyDown}
               placeholder="메시지를 입력하세요."
-              rows={1}
+              className="flex-1 h-11 px-4 text-sm rounded-xl border border-gray-200 focus:border-blue-400 focus:outline-none bg-gray-50"              
               maxLength={500}
-              className="flex-1 px-4 py-3 text-sm rounded-xl border border-gray-200 focus:border-blue-400 focus:outline-none bg-gray-50 resize-none overflow-hidden leading-relaxed"
-              style={{ minHeight: '44px', maxHeight: '120px' }}                       
             />
             <button
               onClick={handleSend}

@@ -17,7 +17,6 @@ import { Quiz } from "../pages/Quiz.tsx";
 import { Chat } from "../pages/Chat.tsx";
 import { Terms } from "../pages/Terms.tsx";
 import { Privacy } from "../pages/Privacy.tsx";
-import { NotFound } from "../pages/NotFound.tsx";
 
 const PageViewTracker = () => {
   usePageView();
@@ -126,8 +125,6 @@ const Router = () => {
         <Route path="/terms" element={isLoggedIn ? <Terms /> : <Navigate to="/login" />} />
         {/* 개인정보처리방침 */}
         <Route path="/privacy" element={isLoggedIn ? <Privacy /> : <Navigate to="/login" />} />
-        {/* 404 */}
-        <Route path="*" element={<NotFound />} />
       </Routes>
     </BrowserRouter>
   );

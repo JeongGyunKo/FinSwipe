@@ -21,12 +21,11 @@ export const Login = () => {
   const [identifier, setIdentifier] = useState("");
   const [password, setPassword] = useState("");
   const [isLoggingIn, setIsLoggingIn] = useState(false);
-  const [errorMsg, setErrorMsg] = useState("");
 
   const handleLogin = async () => {
     // 빈 값 체크
     if (!identifier.trim() || !password.trim()) {
-      setErrorMsg("이메일/아이디와 비밀번호를 입력해주세요.");
+      alert("이메일/아이디와 비밀번호를 입력해주세요.");
       return;
     }
 
@@ -45,7 +44,7 @@ export const Login = () => {
         });
 
         if (!response.ok) {
-          setErrorMsg("존재하지 않는 아이디입니다.");
+          alert("존재하지 않는 아이디입니다.");
           return;
         }
         const data = await response.json();
@@ -61,9 +60,9 @@ export const Login = () => {
 
       if (!loginResponse.ok) {
         if (loginResponse.status === 401 || loginResponse.status === 400) {
-          setErrorMsg("이메일/아이디 또는 비밀번호가 올바르지 않습니다.");
+          alert("이메일/아이디 또는 비밀번호가 올바르지 않습니다.");
         } else {
-          setErrorMsg("로그인에 실패했습니다. 잠시 후 다시 시도해주세요.");
+          alert("로그인에 실패했습니다. 잠시 후 다시 시도해주세요.");
         }
         return;
       }
@@ -110,7 +109,7 @@ export const Login = () => {
 
     } catch (error) {
       console.error("로그인 처리 중 에러:", error);
-      setErrorMsg("네트워크 오류가 발생했습니다. 인터넷 연결을 확인해주세요.");
+      alert("네트워크 오류가 발생했습니다. 인터넷 연결을 확인해주세요.");
     } finally {
       setIsLoggingIn(false);
     }
@@ -165,7 +164,7 @@ export const Login = () => {
             placeholder="example@email.com"
             icon={MailIcon}
             value={identifier}
-            onChange={(e) => { setIdentifier(e.target.value); setErrorMsg(""); }}
+            onChange={(e) => setIdentifier(e.target.value)}
           />
           <Input
             label="비밀번호"
@@ -173,12 +172,12 @@ export const Login = () => {
             placeholder="비밀번호 (8자 이상)"
             icon={PwIcon}
             value={password}
-            onChange={(e) => { setPassword(e.target.value); setErrorMsg(""); }}
+            onChange={(e) => setPassword(e.target.value)}
           />
           <div className="flex justify-between">
             <Link to="/FindEmail" className="text-base font-medium text-gray-600">이메일/아이디 찾기</Link>
             <Link to="/FindPassword" className="text-base font-medium text-gray-600">비밀번호 찾기</Link>
-          </div>          
+          </div>
           <Button
             className="mt-10"
             variant="primary"
@@ -188,9 +187,6 @@ export const Login = () => {
           >
             {isLoggingIn ? "로그인 중..." : "로그인"}
           </Button>
-          {errorMsg && (
-            <p className="text-sm text-red-500 text-center">{errorMsg}</p>
-          )}
           <div className="my-6 flex items-center gap-4">
             <div className="grow h-px bg-gray-200"></div>
             <div className="text-sm text-gray-500">또는</div>

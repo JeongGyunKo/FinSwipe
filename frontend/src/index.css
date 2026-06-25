@@ -27,6 +27,3 @@
   --swiper-pagination-fraction-color: #6b7280;
   @apply text-sm font-medium text-gray-500;
 }
-
-*::-webkit-scrollbar { width:3px;}
-*::-webkit-scrollbar-thumb { background:#dce2ea; border-radius:2px; }

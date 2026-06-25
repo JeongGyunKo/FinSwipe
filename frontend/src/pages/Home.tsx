@@ -12,8 +12,6 @@ export const Home = () => {
   const [isLoading, setIsLoading] = useState(true);
   const [sortType, setSortType] = useState<'time' | 'power'>('time');
   const [activeIndex, setActiveIndex] = useState(0);
-  const [focusArticleId, setFocusArticleId] = useState<string | null>(null);
-  const [isCardFlipped, setIsCardFlipped] = useState(false);
 
   const deckRef = useRef<HTMLDivElement>(null);
   const wlock = useRef(false);
@@ -134,47 +132,19 @@ export const Home = () => {
     return () => {
       window.removeEventListener('homeRefresh', handleRefresh);
     };
-  }, []);  
+  }, []);
 
-  // 다른 페이지에서 특정 뉴스로 진입
+  // scrollTargetTicker 처리 (다른 페이지에서 특정 티커로 진입)
   useEffect(() => {
-  if (!isLoading && groupedNews.length > 0) {
-    const alertArticleStr = sessionStorage.getItem('alertArticle');
-      if (alertArticleStr) {
-        const article = JSON.parse(alertArticleStr);
-        const ticker = article.tickers?.[0];
-        if (ticker) {
-          const targetIndex = groupedNews.findIndex(g => g.tickerName === ticker);
-          if (targetIndex !== -1) setActiveIndex(targetIndex);
-        }
-        sessionStorage.removeItem('alertArticle');
-        setTimeout(() => {
-          setFocusArticleId(article.id);
-        }, 300);
-        return;
-      }
-
+    if (!isLoading && groupedNews.length > 0) {
       const targetTicker = sessionStorage.getItem('scrollTargetTicker');
-      const focusId = sessionStorage.getItem('focusArticleId');
 
       if (targetTicker) {
         const targetIndex = groupedNews.findIndex(g => g.tickerName === targetTicker);
-        if (targetIndex !== -1) setActiveIndex(targetIndex);
-        sessionStorage.removeItem('scrollTargetTicker');
-      }
-
-      if (focusId) {
-        const targetGroup = groupedNews.find(g => 
-          g.articles.some(a => a.id === focusId)
-        );
-        if (targetGroup) {
-          const targetIndex = groupedNews.findIndex(g => g.tickerName === targetGroup.tickerName);
+        if (targetIndex !== -1) {
           setActiveIndex(targetIndex);
         }
-        sessionStorage.removeItem('focusArticleId');
-        setTimeout(() => {
-          setFocusArticleId(focusId);
-        }, 300);
+        sessionStorage.removeItem('scrollTargetTicker');
       }
     }
   }, [isLoading, groupedNews]);
@@ -215,7 +185,6 @@ export const Home = () => {
 
   // 휠 스크롤로 티커 전환
   const handleWheel = (e: React.WheelEvent) => {
-    if (isCardFlipped) return;
     if (Math.abs(e.deltaY) < 16) return;
     if (wlock.current) return;
     wlock.current = true;
@@ -250,13 +219,10 @@ export const Home = () => {
                 </div>
               ) : (
                 <TickerSection
-                  key={`${currentGroup.tickerName}-${focusArticleId}`}
                   group={currentGroup}
                   sortType={sortType}
                   onSortUpdate={handleSortUpdate}
                   onVerticalSwipe={changeTicker}
-                  focusArticleId={focusArticleId}
-                  onFlipChange={setIsCardFlipped}
                 />
               )}
             </div>
