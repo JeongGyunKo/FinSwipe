@@ -26,15 +26,18 @@ public class AdminController {
     private final AppProperties props;
     private final RestClient genaiClient;
     private final com.finswipe.service.TickerDiscoveryService tickerDiscoveryService;
+    private final com.finswipe.service.TickerTimelineService timelineService;
 
     public AdminController(JdbcTemplate jdbc,
                            AppProperties props,
                            @Qualifier("genaiRestClient") RestClient genaiClient,
-                           com.finswipe.service.TickerDiscoveryService tickerDiscoveryService) {
+                           com.finswipe.service.TickerDiscoveryService tickerDiscoveryService,
+                           com.finswipe.service.TickerTimelineService timelineService) {
         this.jdbc = jdbc;
         this.props = props;
         this.genaiClient = genaiClient;
         this.tickerDiscoveryService = tickerDiscoveryService;
+        this.timelineService = timelineService;
     }
 
     /** 전체 유저 목록 — 프리뷰 도구용 */
@@ -227,6 +230,20 @@ public class AdminController {
         requireAdmin(adminKey);
         Thread.ofVirtual().start(tickerDiscoveryService::syncListingStatus);
         return ResponseEntity.accepted().body(Map.of("status", "started"));
+    }
+
+    /** 종목 멀티데이 이벤트 타임라인 — 미국 거래 세션(16:00 ET 마감) 단위. 어드민 프리뷰용. */
+    @GetMapping("/ticker-timeline")
+    public ResponseEntity<Map<String, Object>> tickerTimeline(
+            @RequestHeader("X-Admin-Key") String adminKey,
+            @RequestParam String ticker,
+            @RequestParam(defaultValue = "5") int sessions) {
+        requireAdmin(adminKey);
+        try {
+            return ResponseEntity.ok(timelineService.getTimeline(ticker, sessions));
+        } catch (IllegalArgumentException e) {
+            return ResponseEntity.badRequest().body(Map.of("error", e.getMessage()));
+        }
     }
 
     private void requireAdmin(String key) {

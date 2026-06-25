@@ -1,8 +1,9 @@
 import { useState, useEffect, useId } from "react";
 import { motion, AnimatePresence } from "motion/react";
 import type { PanInfo } from "motion/react";
+import { DigestCard } from './DigestCard';
 import type { NewsCardData } from "../../types/news";
-import type { DigestItem, DigestResponse } from "../../types/digest";
+import type { DigestResponse } from "../../types/digest";
 import { getTimeAgo } from "../../utils/time";
 import { getSourceName } from "../../utils/format";
 
@@ -10,6 +11,8 @@ interface CardDeckProps {
   articles: NewsCardData[];
   groupTicker: string;
   onVerticalSwipe: (direction: 1 | -1) => void;
+  focusArticleId?: string | null;
+  onFlipChange?: (flipped: boolean) => void;
 }
 
 const THEME = {
@@ -37,6 +40,13 @@ const THEME = {
     tint: '#fffbeb', stroke: '#92400e',
     dot: 'bg-amber-500', pill: 'bg-amber-50 text-amber-800',
   },
+};
+
+const getSentimentText = (label: string, score: number) => {
+  if (label === 'positive') return score >= 60 ? '강한 긍정' : '약한 긍정';
+  if (label === 'negative') return score <= -60 ? '강한 부정' : '약한 부정';
+  if (label === 'mixed') return '혼재';
+  return '중립';
 };
 
 function Sparkline({ data, strokeColor }: { data: number[]; strokeColor: string }) {
@@ -101,7 +111,7 @@ function FrontFace({ article, groupTicker }: { article: NewsCardData; groupTicke
       <div className="flex-1 flex flex-col justify-center px-4 gap-2">
         <span className="inline-flex items-center gap-1.5 self-start text-sm font-bold px-3 py-1.5 rounded-full"
           style={{ background: 'rgba(255,255,255,0.7)', color: t.ink }}>
-          {label === 'positive' ? '강한 긍정' : label === 'negative' ? '강한 부정' : label === 'mixed' ? '혼재' : '중립'}
+          {getSentimentText(label, score)}
         </span>
         <p className="text-[72px] font-black leading-none" style={{ color: t.ink, letterSpacing: '-2px' }}>{scoreStr}</p>
         {article.sentimentReason && (
@@ -156,15 +166,12 @@ function BackFace({ article, groupTicker }: { article: NewsCardData; groupTicker
     <div className="absolute inset-0 rounded-[28px] overflow-hidden flex flex-col bg-white"
       style={{ transform: 'rotateY(180deg)', backfaceVisibility: 'hidden', WebkitBackfaceVisibility: 'hidden' as never }}>
       <div className="h-0.75 shrink-0" style={{ background: t.acc }} />
-      <div className="flex-1 overflow-y-auto px-4 py-3 flex flex-col gap-4">
+      <div className="flex-1 overflow-y-auto px-4 py-3 flex flex-col gap-4 shadow-2xs">
         <div className="flex justify-between items-start">
-          <div>
+          <div className="flex gap-1">
             <p className="text-lg font-black leading-none" style={{ color: t.ink }}>{groupTicker}</p>
             <p className="text-[10px] mt-1" style={{ color: t.soft }}>{article.tickerNames?.[0]?.corp ?? ''}</p>
           </div>
-          <span className="text-xs font-semibold px-2 py-1 rounded-full" style={{ background: t.tint, color: t.acc }}>
-            ${groupTicker}
-          </span>
         </div>
         <div>
           <p className="text-[10px] font-bold uppercase tracking-widest mb-2" style={{ color: t.soft }}>핵심 인사이트</p>
@@ -187,7 +194,7 @@ function BackFace({ article, groupTicker }: { article: NewsCardData; groupTicker
           <p className="text-[42px] font-black leading-none shrink-0" style={{ color: t.acc }}>{scoreStr}</p>
           <div>
             <p className="text-sm font-bold" style={{ color: t.ink }}>
-              {label === 'positive' ? '강한 긍정' : label === 'negative' ? '강한 부정' : label === 'mixed' ? '혼재' : '중립'}
+              {getSentimentText(label, score)}
             </p>
             {article.sentimentReason && (
               <p className="text-sm mt-1 leading-relaxed max-w-55" style={{ color: t.soft }}>{article.sentimentReason}</p>
@@ -217,109 +224,11 @@ function BackFace({ article, groupTicker }: { article: NewsCardData; groupTicker
   );
 }
 
-// ── 다이제스트 카드 ──────────────────────────────────────────────────────────
-function DigestCard({ digest }: { digest: DigestItem;}) {
-  const ti = digest.technical_indicators;
-  const avg = digest.sentiment_overview.avg_score;
-  const isPositive = avg >= 0.1;
-  const isNegative = avg <= -0.1;
-  const acc = isPositive ? '#0f8f63' : isNegative ? '#c42020' : '#2563eb';
-  const accBg = isPositive ? '#f0fdf4' : isNegative ? '#fff5f5' : '#eff6ff';
-  const scoreStr = `${avg >= 0 ? '+' : ''}${avg.toFixed(1)}`;
-  const chg1d = ti?.change_pct_1d;
-  const rsiSignalColor = ti?.RSI_signal === '과매수' ? '#c42020' : ti?.RSI_signal === '과매도' ? '#0f8f63' : '#64748b';
-  const macdColor = ti?.MACD?.trend === '상승' ? '#0f8f63' : '#c42020';
-
-  return (
-    <div className="absolute top-0 bottom-4 rounded-[28px] overflow-hidden flex flex-col bg-white border border-gray-100">
-      {/* 상단 포인트 바 */}
-      <div className="h-1 shrink-0" style={{ background: acc }} />
-
-      {/* 헤더 */}
-      <div className="flex items-start justify-between px-5 pt-5 pb-3 shrink-0 border-b border-gray-100">
-        <div>
-          <div className="flex items-center gap-2">
-            <p className="text-2xl font-black text-gray-900">{digest.ticker}</p>
-            <span className="text-[10px] font-bold px-2 py-0.5 rounded-full"
-              style={{ background: accBg, color: acc }}>
-              {digest.articles_count}건 분석
-            </span>
-          </div>
-          <p className="text-xs mt-1 text-gray-400">✨ 하루 종합 인사이트</p>
-        </div>
-        {ti?.current_price != null && (
-          <div className="text-right">
-            <p className="text-base font-bold text-gray-900">${ti.current_price.toFixed(2)}</p>
-            {chg1d != null && (
-              <p className="text-xs font-semibold mt-0.5" style={{ color: acc }}>
-                {chg1d >= 0 ? '▲' : '▼'} {Math.abs(chg1d).toFixed(1)}%
-              </p>
-            )}
-          </div>
-        )}
-      </div>
-
-      <div className="flex-1 overflow-y-auto px-5 py-4 flex flex-col gap-4">
-        {/* 감성 점수 */}
-        <div className="flex items-center gap-4">
-          <p className="text-[56px] font-black leading-none" style={{ color: acc, letterSpacing: '-2px' }}>
-            {scoreStr}
-          </p>
-          <div className="flex flex-col gap-1">
-            <div className="flex gap-2 text-xs text-gray-500">
-              <span>긍정 <b className="text-gray-800">{digest.sentiment_overview.positive}</b></span>
-              <span>부정 <b className="text-gray-800">{digest.sentiment_overview.negative}</b></span>
-              <span>중립 <b className="text-gray-800">{digest.sentiment_overview.neutral}</b></span>
-            </div>
-          </div>
-        </div>
-
-        {/* 요약 */}
-        <p className="text-sm text-gray-700 leading-relaxed">{digest.summary}</p>
-
-        {/* 지표 */}
-        {(ti?.RSI != null || ti?.MACD || ti?.volume_ratio != null) && (
-          <div className="flex flex-col gap-2">
-            <p className="text-[10px] font-bold uppercase tracking-widest text-gray-400">기술적 지표</p>
-            <div className="flex gap-2">
-              {ti?.RSI != null && (
-                <div className="flex-1 rounded-2xl p-3 bg-gray-50">
-                  <p className="text-[9px] font-bold text-gray-400">RSI</p>
-                  <p className="text-base font-black text-gray-900">{ti.RSI.toFixed(1)}</p>
-                  {ti.RSI_signal && <p className="text-[9px] font-bold" style={{ color: rsiSignalColor }}>{ti.RSI_signal}</p>}
-                </div>
-              )}
-              {ti?.MACD && (
-                <div className="flex-1 rounded-2xl p-3 bg-gray-50">
-                  <p className="text-[9px] font-bold text-gray-400">MACD</p>
-                  <p className="text-base font-black text-gray-900">{ti.MACD.macd?.toFixed(2) ?? '—'}</p>
-                  {ti.MACD.trend && <p className="text-[9px] font-bold" style={{ color: macdColor }}>{ti.MACD.trend}</p>}
-                </div>
-              )}
-              {ti?.volume_ratio != null && (
-                <div className="flex-1 rounded-2xl p-3 bg-gray-50">
-                  <p className="text-[9px] font-bold text-gray-400">거래량</p>
-                  <p className="text-base font-black text-gray-900">{ti.volume_ratio.toFixed(2)}x</p>
-                  <p className="text-[9px] font-bold text-gray-400">평균 대비</p>
-                </div>
-              )}
-            </div>
-          </div>
-        )}
-
-        {/* 면책조항 */}
-        <p className="text-[10px] text-center text-gray-300 leading-relaxed mt-auto pb-1">
-          본 서비스는 투자 참고용 정보를 제공하며, 수익성을 보장하지 않습니다.
-        </p>
-      </div>
-    </div>
-  );
-}
-
 // ── 메인 ────────────────────────────────────────────────────────────────────
-export const CardDeck = ({ articles, groupTicker, onVerticalSwipe }: CardDeckProps) => {
+export const CardDeck = ({ articles, groupTicker, onVerticalSwipe, focusArticleId, onFlipChange }: CardDeckProps) => {
   const [currentIndex, setCurrentIndex] = useState(0);
   const [isFlipped, setIsFlipped] = useState(false);
+  const [dragX, setDragX] = useState(0);
   const [gone, setGone] = useState(false);
   const [goneDir, setGoneDir] = useState(0);
 
@@ -351,6 +260,16 @@ export const CardDeck = ({ articles, groupTicker, onVerticalSwipe }: CardDeckPro
 
   const currentArticle = articles[currentIndex];
   const nextArticle = articles[currentIndex + 1];
+
+  useEffect(() => {
+    if (focusArticleId && articles.length > 0) {
+      const idx = articles.findIndex(a => a.id === focusArticleId);
+      if (idx !== -1) {
+        setCurrentIndex(idx);
+        sessionStorage.removeItem('pendingFocusArticleId');
+      }
+    }
+  }, [focusArticleId, articles]);
 
   // 카드 소진 시 digest API 호출
   useEffect(() => {
@@ -392,6 +311,7 @@ export const CardDeck = ({ articles, groupTicker, onVerticalSwipe }: CardDeckPro
   };
 
   const handleDragEnd = (_: unknown, info: PanInfo) => {
+    setDragX(0);
     if (gone) return;
     const { offset, velocity } = info;
     if (!isFlipped && Math.abs(offset.y) > Math.abs(offset.x) && Math.abs(offset.y) > 80) {
@@ -453,7 +373,12 @@ export const CardDeck = ({ articles, groupTicker, onVerticalSwipe }: CardDeckPro
           <div className="flex flex-col items-center justify-center h-full gap-4 text-gray-400">
             <p className="text-2xl">✅</p>
             <p className="text-sm">오늘의 인사이트를 모두 확인했어요</p>
-            <button onClick={() => setCurrentIndex(0)}
+            <button onClick={() => {
+              setCurrentIndex(0)
+              setDigestData(null);
+              setDigestIndex(0);
+              setDigestError(false);
+            }}
               className="px-4 py-2 text-sm text-blue-600 border border-blue-600 rounded-xl">
               처음부터 다시보기
             </button>
@@ -501,7 +426,7 @@ export const CardDeck = ({ articles, groupTicker, onVerticalSwipe }: CardDeckPro
               dragConstraints={{ left: 0, right: 0, top: 0, bottom: 0 }}
               onDragEnd={handleDigestDragEnd}
             >
-              <DigestCard digest={currentDigest} />
+              <DigestCard digest={currentDigest} articlesCount={articles.length} />
             </motion.div>
           </AnimatePresence>
         </div>
@@ -545,9 +470,36 @@ export const CardDeck = ({ articles, groupTicker, onVerticalSwipe }: CardDeckPro
         drag={!gone}
         dragElastic={0.12}
         dragConstraints={{ left: 0, right: 0, top: 0, bottom: 0 }}
+        onDrag={(_, info) => setDragX(info.offset.x)}
         onDragEnd={handleDragEnd}
-        onTap={() => { if (!gone) setIsFlipped(f => !f); }}
+        onTap={() => {
+          if (!gone) {
+            const next = !isFlipped;
+            setIsFlipped(next);
+            onFlipChange?.(next);
+          }
+        }}
       >
+        {/* 스탬프 */}
+        <AnimatePresence>
+          {dragX > 30 && (
+            <motion.div
+              initial={{ opacity: 0 }} animate={{ opacity: Math.min(dragX / 100, 1) }} exit={{ opacity: 0 }}
+              className="absolute top-6 right-5 border-2 border-emerald-500 text-emerald-500 font-bold text-base px-3 py-1 rounded-lg rotate-12 z-10 bg-white/80"
+            >
+              관심있음
+            </motion.div>
+          )}
+          {dragX < -30 && (
+            <motion.div
+              initial={{ opacity: 0 }} animate={{ opacity: Math.min(-dragX / 100, 1) }} exit={{ opacity: 0 }}
+              className="absolute top-6 left-5 border-2 border-gray-400 text-gray-500 font-bold text-base px-3 py-1 rounded-lg -rotate-12 z-10 bg-white/80"
+            >
+              관심없음
+            </motion.div>
+          )}
+        </AnimatePresence>
+
         <motion.div
           animate={{ rotateY: isFlipped ? 180 : 0 }}
           transition={{ type: 'spring', stiffness: 220, damping: 30 }}
