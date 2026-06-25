@@ -30,3 +30,14 @@ export interface DigestResponse {
   user_tendency: string;
   generated_at: string;
 }
+
+export interface TimelineSession {
+  label: string;
+  sentiment: string;
+  count: number;
+  articles: { headlineKo: string }[];
+}
+
+export interface TimelineResponse {
+  sessions: TimelineSession[];
+}
